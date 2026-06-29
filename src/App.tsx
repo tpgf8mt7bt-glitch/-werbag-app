@@ -1418,54 +1418,196 @@ function PaymentsPanel({patient,onChange}){
   );
 }
 
-// ─── APPOINTMENTS / CONSULTORIO.ME ────────────────────────────────────────────
-function AppointmentsPanel({patient}){
-  const fullName=`${patient.firstName||""} ${patient.lastName||""}`.trim();
-  const searchName=encodeURIComponent(fullName);
-  const consultorioUrl=`https://www.consultorio.me`;
+// ─── AGENDA / CALENDAR PANEL ─────────────────────────────────────────────────
+function AgendaPanel({patient,onChange,currentProf,allPatients,onSelectPatient}){
+  const today=new Date().toISOString().slice(0,10);
+  const [viewDate,setViewDate]=useState(today.slice(0,7)); // "YYYY-MM"
+  const [showForm,setShowForm]=useState(false);
+  const [form,setForm]=useState({date:today,time:"09:00",duration:30,notes:"",patientId:patient?.id||""});
+  const [appointments,setAppointments]=useState([]);
+  const [loadingAppts,setLoadingAppts]=useState(true);
+
+  // Cargar turnos del profesional desde storage
+  useEffect(()=>{
+    (async()=>{
+      setLoadingAppts(true);
+      try{
+        const r=await sGet(`agenda:${currentProf.id}`);
+        if(r?.value) setAppointments(JSON.parse(r.value));
+        else setAppointments([]);
+      }catch{setAppointments([]);}
+      finally{setLoadingAppts(false);}
+    })();
+  },[currentProf.id]);
+
+  const saveAppts=async(list)=>{
+    setAppointments(list);
+    await sSet(`agenda:${currentProf.id}`,list);
+  };
+
+  const addAppt=async()=>{
+    if(!form.date||!form.patientId) return;
+    const newAppt={id:Date.now().toString(),patientId:form.patientId,date:form.date,
+      time:form.time,duration:parseInt(form.duration)||30,notes:form.notes,
+      createdAt:new Date().toISOString()};
+    const updated=[...appointments,newAppt].sort((a,b)=>
+      (a.date+a.time).localeCompare(b.date+b.time));
+    await saveAppts(updated);
+    setShowForm(false);
+    setForm({date:today,time:"09:00",duration:30,notes:"",patientId:patient?.id||""});
+  };
+
+  const delAppt=async id=>{
+    await saveAppts(appointments.filter(a=>a.id!==id));
+  };
+
+  // Calendario
+  const [year,month]=viewDate.split("-").map(Number);
+  const firstDay=new Date(year,month-1,1).getDay();
+  const daysInMonth=new Date(year,month,0).getDate();
+  const prevMonth=()=>{const d=new Date(year,month-2,1);setViewDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);};
+  const nextMonth=()=>{const d=new Date(year,month,1);setViewDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);};
+  const monthNames=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const dayNames=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+
+  const getPatientName=id=>{
+    const p=(allPatients||[]).find(x=>x.id===id);
+    return p?`${p.lastName||""}, ${p.firstName||""}`.trim()||"Sin nombre":"Paciente";
+  };
+
+  const apptsByDay={};
+  appointments.forEach(a=>{
+    if(!apptsByDay[a.date]) apptsByDay[a.date]=[];
+    apptsByDay[a.date].push(a);
+  });
+
+  const [selectedDay,setSelectedDay]=useState(today);
+  const dayAppts=(apptsByDay[selectedDay]||[]).sort((a,b)=>a.time.localeCompare(b.time));
+
+  // Fuente de pacientes para el selector
+  const patientPool=allPatients||[];
 
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1e293b"}}>📅 Turnos</h3>
+        <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1e293b"}}>📅 Agenda</h3>
+        <button onClick={()=>{setForm({date:selectedDay,time:"09:00",duration:30,notes:"",patientId:patient?.id||""});setShowForm(true);}}
+          style={btnPrimary}>+ Nuevo turno</button>
       </div>
 
-      <div style={{backgroundColor:"#f0f9ff",borderRadius:14,padding:24,border:"1px solid #bae6fd",textAlign:"center",marginBottom:16}}>
-        <div style={{fontSize:40,marginBottom:10}}>🔗</div>
-        <div style={{fontWeight:800,fontSize:16,color:"#0369a1",marginBottom:6}}>Integrado con Consultorio.me</div>
-        <div style={{fontSize:13,color:"#0284c7",marginBottom:18,lineHeight:1.6}}>
-          Los turnos se gestionan en tu cuenta de Consultorio.me.<br/>
-          Desde acá podés acceder directamente a la agenda del paciente.
+      {/* Formulario nuevo turno */}
+      {showForm&&(
+        <div style={{backgroundColor:"#f8fafc",borderRadius:12,padding:16,marginBottom:16,border:"1px solid #e2e8f0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:12,textTransform:"uppercase",letterSpacing:0.4}}>Nuevo turno</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><label style={ls}>Fecha</label>
+              <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={is}/></div>
+            <div><label style={ls}>Hora</label>
+              <input type="time" value={form.time} onChange={e=>setForm(f=>({...f,time:e.target.value}))} style={is}/></div>
+            <div><label style={ls}>Duración (min)</label>
+              <select value={form.duration} onChange={e=>setForm(f=>({...f,duration:e.target.value}))} style={{...is,padding:"9px 12px"}}>
+                {[15,20,30,45,60,90,120].map(d=><option key={d} value={d}>{d} min</option>)}
+              </select></div>
+            <div><label style={ls}>Paciente</label>
+              <select value={form.patientId} onChange={e=>setForm(f=>({...f,patientId:e.target.value}))}
+                style={{...is,padding:"9px 12px",borderColor:!form.patientId?"#fca5a5":undefined}}>
+                <option value="">— Seleccionar paciente —</option>
+                {patientPool.map(p=><option key={p.id} value={p.id}>{(p.lastName||"")}, {(p.firstName||"")} {p.dni?`· DNI ${p.dni}`:""}</option>)}
+              </select></div>
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={ls}>Notas del turno</label>
+            <input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}
+              placeholder="Ej: Control, extracción, urgencia..." style={is}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setShowForm(false)} style={btnSecondary}>Cancelar</button>
+            <button onClick={addAppt} disabled={!form.date||!form.patientId}
+              style={{...btnPrimary,flex:1,opacity:!form.date||!form.patientId?0.6:1}}>
+              💾 Guardar turno
+            </button>
+          </div>
         </div>
+      )}
 
-        <div style={{display:"flex",flexDirection:"column",gap:10,maxWidth:320,margin:"0 auto"}}>
-          <a href={consultorioUrl} target="_blank" rel="noopener noreferrer"
-            style={{...btnPrimary,display:"block",textDecoration:"none",textAlign:"center",padding:"12px 20px",fontSize:14}}>
-            🗓 Abrir Consultorio.me
-          </a>
-          <a href={`${consultorioUrl}/agenda`} target="_blank" rel="noopener noreferrer"
-            style={{...btnSecondary,display:"block",textDecoration:"none",textAlign:"center",padding:"12px 20px",fontSize:14}}>
-            📋 Ver agenda completa
-          </a>
+      {/* Calendario */}
+      <div style={{backgroundColor:"#fff",borderRadius:12,border:"1px solid #e2e8f0",overflow:"hidden",marginBottom:12}}>
+        {/* Header mes */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",
+          backgroundColor:"#1e293b",color:"#fff"}}>
+          <button onClick={prevMonth} style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:18,padding:"0 4px"}}>‹</button>
+          <span style={{fontWeight:700,fontSize:14}}>{monthNames[month-1]} {year}</span>
+          <button onClick={nextMonth} style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:18,padding:"0 4px"}}>›</button>
+        </div>
+        {/* Días de semana */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",backgroundColor:"#f1f5f9"}}>
+          {dayNames.map(d=><div key={d} style={{padding:"6px 0",textAlign:"center",fontSize:10,fontWeight:700,color:"#64748b"}}>{d}</div>)}
+        </div>
+        {/* Días del mes */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
+          {Array.from({length:firstDay}).map((_,i)=><div key={`e${i}`}/>)}
+          {Array.from({length:daysInMonth}).map((_,i)=>{
+            const day=i+1;
+            const dateStr=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const hasAppts=apptsByDay[dateStr]?.length>0;
+            const isToday=dateStr===today;
+            const isSelected=dateStr===selectedDay;
+            return(
+              <div key={day} onClick={()=>setSelectedDay(dateStr)}
+                style={{padding:"6px 0",textAlign:"center",cursor:"pointer",position:"relative",
+                  backgroundColor:isSelected?"#2563eb":isToday?"#eff6ff":"transparent",
+                  borderRadius:isSelected||isToday?"50%":"0",margin:"1px auto",width:32,height:32,
+                  display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}}>
+                <span style={{fontSize:12,fontWeight:isToday||isSelected?700:400,
+                  color:isSelected?"#fff":isToday?"#2563eb":"#1e293b"}}>{day}</span>
+                {hasAppts&&<div style={{width:4,height:4,borderRadius:"50%",
+                  backgroundColor:isSelected?"#fff":"#2563eb",marginTop:1}}/>}
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      <div style={{backgroundColor:"#fff",borderRadius:12,padding:16,border:"1px solid #e2e8f0"}}>
-        <div style={{fontWeight:700,fontSize:13,color:"#374151",marginBottom:10}}>Datos del paciente para Consultorio.me</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[["Nombre",fullName||"—"],["DNI",patient.dni||"—"],["Teléfono",patient.phone||"—"],["Email",patient.email||"—"],["Obra Social",patient.obraSocial||"—"],["Nro. Afiliado",patient.nroAfiliado||"—"]].map(([k,v])=>(
-            <div key={k} style={{padding:"8px 12px",backgroundColor:"#f8fafc",borderRadius:8}}>
-              <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",marginBottom:2}}>{k}</div>
-              <div style={{fontSize:13,fontWeight:600,color:"#1e293b"}}>{v}</div>
+      {/* Turnos del día seleccionado */}
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:0.4}}>
+          {selectedDay===today?"Hoy":"Turnos del"} {selectedDay===today?"":selectedDay}
+          {dayAppts.length>0&&<span style={{marginLeft:6,backgroundColor:"#eff6ff",color:"#2563eb",
+            padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700,textTransform:"none"}}>{dayAppts.length} turno{dayAppts.length>1?"s":""}</span>}
+        </div>
+        {loadingAppts&&<div style={{textAlign:"center",color:"#94a3b8",padding:16}}>Cargando...</div>}
+        {!loadingAppts&&dayAppts.length===0&&(
+          <div style={{padding:20,textAlign:"center",color:"#94a3b8",backgroundColor:"#f8fafc",
+            borderRadius:10,border:"1px dashed #e2e8f0",fontSize:13}}>
+            Sin turnos para este día
+          </div>
+        )}
+        {dayAppts.map(a=>(
+          <div key={a.id} style={{backgroundColor:"#fff",borderRadius:10,padding:"12px 14px",
+            marginBottom:8,border:"1px solid #e2e8f0",borderLeft:"4px solid #2563eb",
+            display:"flex",alignItems:"center",gap:10}}>
+            <div style={{textAlign:"center",flexShrink:0,backgroundColor:"#eff6ff",
+              borderRadius:8,padding:"6px 10px",minWidth:48}}>
+              <div style={{fontSize:14,fontWeight:800,color:"#2563eb"}}>{a.time}</div>
+              <div style={{fontSize:9,color:"#94a3b8"}}>{a.duration}min</div>
             </div>
-          ))}
-        </div>
-        <div style={{marginTop:12,padding:"10px 12px",backgroundColor:"#fef9c3",borderRadius:8,fontSize:12,color:"#854d0e"}}>
-          💡 <b>Tip:</b> Para una integración completa con la API de Consultorio.me y sincronización automática de turnos, contactanos para configurar tu cuenta.
-        </div>
+            <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>onSelectPatient&&onSelectPatient(a.patientId)}>
+              <div style={{fontWeight:700,fontSize:13,color:"#1e293b",overflow:"hidden",
+                textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{getPatientName(a.patientId)}</div>
+              {a.notes&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}>{a.notes}</div>}
+            </div>
+            <button onClick={()=>delAppt(a.id)} style={{background:"none",border:"none",
+              cursor:"pointer",color:"#94a3b8",fontSize:16,flexShrink:0}}>🗑</button>
+          </div>
+        ))}
       </div>
     </div>
   );
+}
+
+// Alias para que la tab "turnos" siga funcionando
+function AppointmentsPanel({patient,onChange,currentProf,allPatients,onSelectPatient}){
+  return <AgendaPanel patient={patient} onChange={onChange} currentProf={currentProf} allPatients={allPatients} onSelectPatient={onSelectPatient}/>;
 }
 
 // ─── PDF EXPORT ───────────────────────────────────────────────────────────────
@@ -2147,6 +2289,153 @@ function ConfirmModal({msg, onOk, onCancel}){
   );
 }
 
+
+// ─── DASHBOARD (pantalla de inicio) ─────────────────────────────────────────
+function Dashboard({currentProf,patients,allPatients,onSelectPatient}){
+  const today=new Date().toISOString().slice(0,10);
+  const [appointments,setAppointments]=useState([]);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      try{
+        const r=await sGet(`agenda:${currentProf.id}`);
+        if(r?.value) setAppointments(JSON.parse(r.value));
+        else setAppointments([]);
+      }catch{setAppointments([]);}
+      finally{setLoading(false);}
+    })();
+  },[currentProf.id]);
+
+  const todayAppts=appointments
+    .filter(a=>a.date===today)
+    .sort((a,b)=>a.time.localeCompare(b.time));
+
+  const getPatientName=id=>{
+    const p=(allPatients||[]).find(x=>x.id===id);
+    return p?`${p.lastName||""}, ${p.firstName||""}`.trim()||"Sin nombre":"Paciente";
+  };
+  const getPatientData=id=>(allPatients||[]).find(x=>x.id===id);
+
+  const weekAppts=appointments
+    .filter(a=>{const d=new Date(a.date+"T12:00:00");const t=new Date(today+"T12:00:00");
+      const diff=(d-t)/(1000*60*60*24);return diff>0&&diff<=6;})
+    .sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))
+    .slice(0,5);
+
+  const drTitle=currentProf.gender==="dra"?"Dra.":"Dr.";
+  const hour=new Date().getHours();
+  const greeting=hour<12?"Buenos días":hour<19?"Buenas tardes":"Buenas noches";
+
+  return(
+    <div style={{padding:20,maxWidth:700,margin:"0 auto"}}>
+      {/* Header saludo */}
+      <div style={{marginBottom:20,padding:"20px 24px",
+        background:"linear-gradient(135deg,#1e293b 0%,#2563eb 100%)",
+        borderRadius:16,color:"#fff"}}>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginBottom:4}}>{greeting}</div>
+        <div style={{fontSize:22,fontWeight:800}}>{drTitle} {currentProf.name}</div>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginTop:4}}>
+          {new Date().toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+        </div>
+      </div>
+
+      {/* Stats rápidas */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+        {[
+          {label:"Pacientes",value:patients.length,icon:"👥",color:"#2563eb",bg:"#eff6ff"},
+          {label:"Turnos hoy",value:todayAppts.length,icon:"📅",color:"#059669",bg:"#f0fdf4"},
+          {label:"Esta semana",value:weekAppts.length,icon:"📆",color:"#d97706",bg:"#fffbeb"},
+        ].map(({label,value,icon,color,bg})=>(
+          <div key={label} style={{backgroundColor:bg,borderRadius:12,padding:"14px",border:`1px solid ${color}22`,textAlign:"center"}}>
+            <div style={{fontSize:22}}>{icon}</div>
+            <div style={{fontSize:24,fontWeight:800,color,lineHeight:1}}>{value}</div>
+            <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Turnos de hoy */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#1e293b",marginBottom:10,
+          display:"flex",alignItems:"center",gap:8}}>
+          📅 Turnos de hoy
+          {todayAppts.length>0&&<span style={{backgroundColor:"#2563eb",color:"#fff",
+            borderRadius:10,padding:"2px 8px",fontSize:11}}>{todayAppts.length}</span>}
+        </div>
+        {loading&&<div style={{textAlign:"center",color:"#94a3b8",padding:16,fontSize:13}}>Cargando agenda...</div>}
+        {!loading&&todayAppts.length===0&&(
+          <div style={{padding:"16px 20px",backgroundColor:"#f8fafc",borderRadius:10,
+            border:"1px dashed #e2e8f0",fontSize:13,color:"#94a3b8",textAlign:"center"}}>
+            No hay turnos agendados para hoy
+          </div>
+        )}
+        {todayAppts.map(a=>{
+          const pat=getPatientData(a.patientId);
+          return(
+            <div key={a.id} onClick={()=>pat&&onSelectPatient(a.patientId)}
+              style={{backgroundColor:"#fff",borderRadius:10,padding:"12px 16px",marginBottom:8,
+                border:"1px solid #e2e8f0",borderLeft:"4px solid #2563eb",
+                display:"flex",alignItems:"center",gap:12,
+                cursor:pat?"pointer":"default",transition:"background 0.15s"}}
+              onMouseEnter={e=>{if(pat)e.currentTarget.style.backgroundColor="#f8fafc";}}
+              onMouseLeave={e=>{e.currentTarget.style.backgroundColor="#fff";}}>
+              <div style={{backgroundColor:"#eff6ff",borderRadius:8,padding:"8px 10px",
+                textAlign:"center",flexShrink:0,minWidth:52}}>
+                <div style={{fontSize:15,fontWeight:800,color:"#2563eb"}}>{a.time}</div>
+                <div style={{fontSize:9,color:"#94a3b8"}}>{a.duration}min</div>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:14,color:"#1e293b",
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {getPatientName(a.patientId)}
+                </div>
+                {a.notes&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>{a.notes}</div>}
+                {pat?.obraSocial&&<div style={{fontSize:11,color:"#7c3aed",marginTop:2}}>{pat.obraSocial}</div>}
+              </div>
+              {pat&&<div style={{color:"#2563eb",fontSize:18,flexShrink:0}}>›</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Próximos turnos */}
+      {weekAppts.length>0&&(
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:"#1e293b",marginBottom:10}}>
+            📆 Próximos turnos
+          </div>
+          {weekAppts.map(a=>{
+            const pat=getPatientData(a.patientId);
+            const d=new Date(a.date+"T12:00:00");
+            const dayLabel=d.toLocaleDateString("es-AR",{weekday:"short",day:"numeric",month:"short"});
+            return(
+              <div key={a.id} onClick={()=>pat&&onSelectPatient(a.patientId)}
+                style={{backgroundColor:"#fff",borderRadius:10,padding:"10px 14px",marginBottom:6,
+                  border:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:10,
+                  cursor:pat?"pointer":"default"}}
+                onMouseEnter={e=>{if(pat)e.currentTarget.style.backgroundColor="#f8fafc";}}
+                onMouseLeave={e=>{e.currentTarget.style.backgroundColor="#fff";}}>
+                <div style={{fontSize:11,color:"#2563eb",fontWeight:700,flexShrink:0,minWidth:64,
+                  textAlign:"center",backgroundColor:"#eff6ff",padding:"4px 6px",borderRadius:6}}>
+                  {dayLabel}
+                </div>
+                <div style={{fontWeight:600,fontSize:12,color:"#374151",flexShrink:0}}>{a.time}</div>
+                <div style={{flex:1,fontSize:13,color:"#1e293b",fontWeight:600,
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {getPatientName(a.patientId)}
+                </div>
+                {pat&&<div style={{color:"#94a3b8",fontSize:16}}>›</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const TABS=[
   {id:"ficha",label:"📋 Ficha"},
@@ -2155,7 +2444,7 @@ const TABS=[
   {id:"imagenes",label:"🩻 Imágenes"},
   {id:"presupuestos",label:"💰 Presupuestos"},
   {id:"pagos",label:"💳 Pagos"},
-  {id:"turnos",label:"📅 Turnos"},
+  {id:"turnos",label:"📅 Agenda"},
 ];
 
 
@@ -2399,15 +2688,13 @@ function DentalApp({currentProf,onLogout}){
               {activeTab==="imagenes"&&<ImagesPanel patient={sel} onChange={handleChange}/>}
               {activeTab==="presupuestos"&&<BudgetPanel patient={sel} onChange={handleChange} currentProf={profData}/>}
               {activeTab==="pagos"&&<PaymentsPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="turnos"&&<AppointmentsPanel patient={sel}/>}
+              {activeTab==="turnos"&&<AppointmentsPanel patient={sel} onChange={handleChange} currentProf={profData} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);}}/>}
             </div>
           </>
         ):(
-          <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,color:"#94a3b8"}}>
-            <img src={LOGO_B64} alt="Logo" style={{width:100,height:100,borderRadius:18,objectFit:"cover",boxShadow:"0 8px 24px rgba(0,0,0,0.12)"}}/>
-            <div style={{fontSize:17,fontWeight:800,color:"#1e293b"}}>Odontología Werbag</div>
-            <div style={{fontSize:13}}>Seleccioná un paciente o creá uno nuevo</div>
-            <button onClick={handleNew} style={{...btnPrimary,marginTop:8,padding:"10px 24px",fontSize:14}}>+ Crear primer paciente</button>
+          <div style={{flex:1,overflowY:"auto"}}>
+            <Dashboard currentProf={profData} patients={patients} allPatients={allPatients}
+              onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}/>
           </div>
         )}
       </div>
