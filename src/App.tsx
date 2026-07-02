@@ -3365,4 +3365,77 @@ function DentalApp({currentProf,onLogout}){
                 <button onClick={()=>exportPDF(sel)} title="Exportar PDF" style={{...btnSecondary,padding:"6px 11px",fontSize:12}}>📄 PDF</button>
                 <button onClick={handleDelete} style={{padding:"6px 10px",borderRadius:8,border:"2px solid #fee2e2",backgroundColor:"#fff",color:"#ef4444",fontWeight:600,fontSize:12,cursor:"pointer"}}>🗑</button>
                 <button onClick={handleSaveNow}
-    
+                  style={{...btnPrimary,padding:"6px 14px",fontSize:12,opacity:saveStatus==="saving"?0.7:1}}>
+                  💾 Guardar
+                </button>
+              </div>
+            </>
+          ):(
+            <div style={{color:"#94a3b8",fontSize:13}}>← Seleccioná un paciente o creá uno nuevo</div>
+          )}
+        </div>
+
+        {sel?(
+          <>
+            {/* Tabs */}
+            <div style={{backgroundColor:"#fff",borderBottom:"1px solid #e2e8f0",display:"flex",padding:"0 16px",flexShrink:0,overflowX:"auto"}}>
+              {TABS.map(tab=>(
+                <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
+                  style={{padding:"11px 13px",border:"none",background:"none",cursor:"pointer",fontWeight:700,fontSize:12,whiteSpace:"nowrap",
+                    color:activeTab===tab.id?"#2563eb":"#94a3b8",
+                    borderBottom:activeTab===tab.id?"2px solid #2563eb":"2px solid transparent",marginBottom:-1}}>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Content */}
+            <div style={{flex:1,overflowY:"auto",padding:20}}>
+              {activeTab==="ficha"&&<PatientForm patient={sel} onChange={handleChange}/>}
+              {activeTab==="odontograma"&&(
+                <OdontogramPanel
+                  teeth={sel.teeth||{}} milkTeeth={sel.milkTeeth||{}}
+                  patient={sel} onChange={handleChange}
+                  onTeethChange={t=>handleChange({...sel,teeth:t,updatedAt:new Date().toISOString()})}
+                  onMilkChange={t=>handleChange({...sel,milkTeeth:t,updatedAt:new Date().toISOString()})}
+                />
+              )}
+              {activeTab==="evolucion"&&<EvolutionPanel patient={sel} onChange={handleChange}/>}
+              {activeTab==="imagenes"&&<ImagesPanel patient={sel} onChange={handleChange}/>}
+              {activeTab==="presupuestos"&&<BudgetPanel patient={sel} onChange={handleChange} currentProf={profData}/>}
+              {activeTab==="pagos"&&<PaymentsPanel patient={sel} onChange={handleChange}/>}
+              {activeTab==="turnos"&&<AppointmentsPanel patient={sel} onChange={handleChange} currentProf={profData} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);}}/>}
+            </div>
+          </>
+        ):(
+          <div style={{flex:1,overflowY:"auto"}}>
+            {dashboardView==="estadisticas"?(
+              <StatsPanel currentProf={profData} patients={patients}/>
+            ):(
+              <Dashboard currentProf={profData} patients={patients} allPatients={allPatients}
+                onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}
+                onCreatePendingPatient={handleCreatePendingPatient}/>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
+export default function RootApp(){
+  const [currentProf,setCurrentProf]=useState(null);
+  const [profNames,setProfNames]=useState({});
+
+  const handleLogin=(prof,names,genders={})=>{
+    // Aplicar nombre personalizado y género al objeto del profesional
+    const displayProf={...prof, name: names[prof.id]||prof.name, gender: genders[prof.id]||"dr"};
+    setCurrentProf(displayProf);
+    setProfNames(names);
+  };
+  const handleLogout=()=>{setCurrentProf(null);};
+
+  if(!currentProf) return <LoginScreen onLogin={handleLogin}/>;
+  return <DentalApp currentProf={currentProf} onLogout={handleLogout}/>;
+}
