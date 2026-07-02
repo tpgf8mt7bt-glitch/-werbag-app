@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 const FB_PROJECT = "odontologia-werbag";
 const FB_API_KEY = "AIzaSyAtj2Cz9otET54WtKoSQk5KPPcQ7DOKbVw";
 const FB_BASE = `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents`;
-i
+
 // Convierte clave "prefix:id" en { col, docId }
 const parseKey = k => {
   const parts = k.split(":");
