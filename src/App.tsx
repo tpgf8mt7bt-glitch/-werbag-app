@@ -3282,4 +3282,87 @@ function DentalApp({currentProf,onLogout}){
           setSelectedId(patient.id);setActiveTab("ficha");setSidebarOpen(false);
         }}
         onCancel={()=>setWaMsgModal(null)}/>}
-      {sidebarOpen&&<div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,backgroundColor:"rgba(0,0,0,0.4)",zIndex:1
+      {sidebarOpen&&<div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,backgroundColor:"rgba(0,0,0,0.4)",zIndex:199}}/>}
+
+      {/* SIDEBAR */}
+      <div style={{width:255,minWidth:255,backgroundColor:"#fff",borderRight:"1px solid #e2e8f0",display:"flex",flexDirection:"column",
+        position:"fixed",left:0,top:0,bottom:0,zIndex:200,
+        transform:`translateX(${sidebarOpen||!isMobile?0:-280}px)`,transition:"transform 0.25s ease",
+        boxShadow:sidebarOpen?"4px 0 24px rgba(0,0,0,0.15)":"none"}}>
+        <div style={{padding:"12px 14px 10px",borderBottom:"1px solid #f1f5f9"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <img src={LOGO_B64} alt="Logo" style={{width:36,height:36,borderRadius:8,objectFit:"cover",flexShrink:0,boxShadow:"0 2px 8px rgba(0,0,0,0.12)"}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:800,fontSize:12,color:"#1e293b",lineHeight:1.2}}>Odontología Werbag</div>
+              <div style={{fontSize:10,color:"#94a3b8"}}>Sistema de Gestión</div>
+            </div>
+            {isMobile&&<button onClick={()=>setSidebarOpen(false)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#94a3b8"}}>✕</button>}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",
+            backgroundColor:currentProf.color+"11",borderRadius:8,border:`1px solid ${currentProf.color}33`}}>
+            <div style={{width:26,height:26,borderRadius:7,backgroundColor:currentProf.color+"22",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>
+              {profData.gender==="dra"?"👩‍⚕️":"👨‍⚕️"}
+            </div>
+            <div style={{flex:1,minWidth:0,overflow:"hidden"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#1e293b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentProf.name}</div>
+            </div>
+            <button onClick={()=>setShowProfile(true)} title="Editar perfil"
+              style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:13,padding:2,flexShrink:0}}
+              onMouseEnter={e=>e.currentTarget.style.color="#2563eb"}
+              onMouseLeave={e=>e.currentTarget.style.color="#94a3b8"}>
+              ⚙
+            </button>
+            <button onClick={onLogout} title="Cerrar sesión"
+              style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:13,padding:2,flexShrink:0}}
+              onMouseEnter={e=>e.currentTarget.style.color="#ef4444"}
+              onMouseLeave={e=>e.currentTarget.style.color="#94a3b8"}>
+              ⏏
+            </button>
+          </div>
+        </div>
+        <div style={{padding:"10px 14px 0",display:"flex",flexDirection:"column",gap:6}}>
+          <button onClick={()=>{setSelectedId(null);setDashboardView("inicio");setSidebarOpen(false);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:9,
+              border:!selectedId&&dashboardView==="inicio"?"2px solid #2563eb":"2px solid #e2e8f0",
+              backgroundColor:!selectedId&&dashboardView==="inicio"?"#eff6ff":"#fff",
+              color:!selectedId&&dashboardView==="inicio"?"#2563eb":"#64748b",
+              fontWeight:700,fontSize:12,cursor:"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            🏠 Inicio
+          </button>
+          <button onClick={()=>{setSelectedId(null);setDashboardView("estadisticas");setSidebarOpen(false);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:9,
+              border:!selectedId&&dashboardView==="estadisticas"?"2px solid #7c3aed":"2px solid #e2e8f0",
+              backgroundColor:!selectedId&&dashboardView==="estadisticas"?"#f5f3ff":"#fff",
+              color:!selectedId&&dashboardView==="estadisticas"?"#7c3aed":"#64748b",
+              fontWeight:700,fontSize:12,cursor:"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            📊 Estadísticas
+          </button>
+        </div>
+        {loading?<div style={{padding:24,textAlign:"center",color:"#94a3b8"}}>Cargando...</div>
+          :<PatientList patients={patients} allPatients={allPatients} onSelect={handleSelect} onNew={handleNew} selectedId={selectedId} currentProfId={currentProf.id}/>}
+      </div>
+
+      {/* MAIN */}
+      <div style={{marginLeft:isMobile?0:255,flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {/* Header */}
+        <div style={{backgroundColor:"#fff",borderBottom:"1px solid #e2e8f0",padding:"11px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          {isMobile&&<button onClick={()=>setSidebarOpen(true)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#64748b",padding:4}}>☰</button>}
+          {sel?(
+            <>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:800,fontSize:14,color:"#1e293b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {sel.firstName||sel.lastName?`${sel.lastName}, ${sel.firstName}`:"Nuevo paciente"}
+                </div>
+                {sel.allergies?.length>0&&<div style={{fontSize:10,color:"#ef4444",fontWeight:700}}>⚠ Alergias: {sel.allergies.join(", ")}</div>}
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                {saveStatus==="pending"&&<span style={{fontSize:11,color:"#f59e0b",fontWeight:700,display:"flex",alignItems:"center",gap:3}}>⏱ Sin guardar</span>}
+                {saveStatus==="saving"&&<span style={{fontSize:11,color:"#3b82f6",fontWeight:700,display:"flex",alignItems:"center",gap:3}}>⟳ Guardando...</span>}
+                {saveStatus==="saved"&&<span style={{fontSize:11,color:"#22c55e",fontWeight:700,display:"flex",alignItems:"center",gap:3}}>✓ Guardado</span>}
+                <button onClick={()=>exportPDF(sel)} title="Exportar PDF" style={{...btnSecondary,padding:"6px 11px",fontSize:12}}>📄 PDF</button>
+                <button onClick={handleDelete} style={{padding:"6px 10px",borderRadius:8,border:"2px solid #fee2e2",backgroundColor:"#fff",color:"#ef4444",fontWeight:600,fontSize:12,cursor:"pointer"}}>🗑</button>
+                <button onClick={handleSaveNow}
+    
