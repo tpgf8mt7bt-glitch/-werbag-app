@@ -2950,17 +2950,37 @@ function StatsPanel({currentProf,patients}){
 
   // ── Recolectar todos los pagos cobrados de todos los pacientes propios ──
   const allCobros=[];
+  const cobrosConPaciente=[]; // para el detalle por paciente
   (patients||[]).forEach(p=>{
     (p.payments||[]).forEach(pay=>{
       const isPaid = pay.tipo==="pendiente" ? pay.pagado : true;
       if(!isPaid || !pay.amount || !pay.date) return;
-      allCobros.push({
+      const entry={
         date:pay.date,
         amount:parseFloat(pay.amount)||0,
         method:pay.method==="transferencia"?"transferencia":"efectivo",
-      });
+        patientName:`${p.lastName||""}, ${p.firstName||""}`.trim()||"Sin nombre",
+        concept:pay.concept||pay.label||"",
+      };
+      allCobros.push(entry);
+      cobrosConPaciente.push(entry);
     });
   });
+
+  // Detalle hoy por paciente
+  const detHoy=cobrosConPaciente
+    .filter(c=>c.date===today)
+    .sort((a,b)=>a.patientName.localeCompare(b.patientName));
+
+  // Detalle mes por paciente (agrupado)
+  const detMesMap={};
+  cobrosConPaciente.filter(c=>c.date.slice(0,7)===monthStr).forEach(c=>{
+    if(!detMesMap[c.patientName]) detMesMap[c.patientName]={name:c.patientName,efectivo:0,transferencia:0,total:0,items:[]};
+    detMesMap[c.patientName][c.method]+=c.amount;
+    detMesMap[c.patientName].total+=c.amount;
+    detMesMap[c.patientName].items.push(c);
+  });
+  const detMes=Object.values(detMesMap).sort((a,b)=>b.total-a.total);
 
   // ── Totales hoy / mes ──
   let cobrosHoy={efectivo:0,transferencia:0};
@@ -3029,6 +3049,58 @@ function StatsPanel({currentProf,patients}){
           </div>
         </div>
       </div>
+
+      {/* Detalle hoy por paciente */}
+      {detHoy.length>0&&(
+        <div style={{backgroundColor:"#fff",borderRadius:14,border:"1px solid #e2e8f0",marginBottom:16,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",backgroundColor:"#1e293b",color:"#fff",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontWeight:700,fontSize:13}}>💰 Detalle de cobros de hoy</span>
+            <span style={{fontSize:12,color:"#94a3b8"}}>{detHoy.length} cobro{detHoy.length!==1?"s":""}</span>
+          </div>
+          {detHoy.map((c,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",
+              borderBottom:i<detHoy.length-1?"1px solid #f1f5f9":"none",
+              backgroundColor:i%2?"#f8fafc":"#fff"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#1e293b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.patientName}</div>
+                {c.concept&&<div style={{fontSize:11,color:"#64748b",marginTop:1}}>{c.concept}</div>}
+              </div>
+              <div style={{flexShrink:0,textAlign:"right"}}>
+                <div style={{fontWeight:800,fontSize:14,color:"#22c55e"}}>${fmtARS(c.amount)}</div>
+                <div style={{fontSize:10,marginTop:2}}>
+                  {c.method==="efectivo"
+                    ?<span style={{color:"#166534",backgroundColor:"#dcfce7",padding:"1px 6px",borderRadius:6,fontWeight:700}}>💵 Efectivo</span>
+                    :<span style={{color:"#1d4ed8",backgroundColor:"#dbeafe",padding:"1px 6px",borderRadius:6,fontWeight:700}}>🏦 Transferencia</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Detalle mes por paciente */}
+      {detMes.length>0&&(
+        <div style={{backgroundColor:"#fff",borderRadius:14,border:"1px solid #e2e8f0",marginBottom:16,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",backgroundColor:"#f8fafc",borderBottom:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontWeight:700,fontSize:13,color:"#1e293b"}}>📊 Detalle de cobros del mes por paciente</span>
+            <span style={{fontSize:12,color:"#64748b"}}>{detMes.length} paciente{detMes.length!==1?"s":""}</span>
+          </div>
+          {detMes.map((d,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",
+              borderBottom:i<detMes.length-1?"1px solid #f1f5f9":"none",
+              backgroundColor:i%2?"#f8fafc":"#fff"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#1e293b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.name}</div>
+                <div style={{display:"flex",gap:8,marginTop:3,fontSize:11}}>
+                  {d.efectivo>0&&<span style={{color:"#166534",backgroundColor:"#dcfce7",padding:"1px 6px",borderRadius:6,fontWeight:700}}>💵 ${fmtARS(d.efectivo)}</span>}
+                  {d.transferencia>0&&<span style={{color:"#1d4ed8",backgroundColor:"#dbeafe",padding:"1px 6px",borderRadius:6,fontWeight:700}}>🏦 ${fmtARS(d.transferencia)}</span>}
+                </div>
+              </div>
+              <div style={{fontWeight:800,fontSize:15,color:"#1e293b",flexShrink:0}}>${fmtARS(d.total)}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Gráfico comparativo: efectivo vs transferencia */}
       <div style={{backgroundColor:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:20,marginBottom:16}}>
@@ -3355,81 +3427,4 @@ function DentalApp({currentProf,onLogout}){
               <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
                 {saveStatus==="pending"&&<span style={{fontSize:11,color:"#f59e0b",fontWeight:700,display:"flex",alignItems:"center",gap:3}}>⏱ Sin guardar</span>}
                 {saveStatus==="saving"&&<span style={{fontSize:11,color:"#3b82f6",fontWeight:700,display:"flex",alignItems:"center",gap:3}}>⟳ Guardando...</span>}
-                {saveStatus==="saved"&&<span style={{fontSize:11,color:"#22c55e",fontWeight:700,display:"flex",alignItems:"center",gap:3}}>✓ Guardado</span>}
-                <button onClick={()=>exportPDF(sel)} title="Exportar PDF" style={{...btnSecondary,padding:"6px 11px",fontSize:12}}>📄 PDF</button>
-                <button onClick={handleDelete} style={{padding:"6px 10px",borderRadius:8,border:"2px solid #fee2e2",backgroundColor:"#fff",color:"#ef4444",fontWeight:600,fontSize:12,cursor:"pointer"}}>🗑</button>
-                <button onClick={handleSaveNow}
-                  style={{...btnPrimary,padding:"6px 14px",fontSize:12,opacity:saveStatus==="saving"?0.7:1}}>
-                  💾 Guardar
-                </button>
-              </div>
-            </>
-          ):(
-            <div style={{color:"#94a3b8",fontSize:13}}>← Seleccioná un paciente o creá uno nuevo</div>
-          )}
-        </div>
-
-        {sel?(
-          <>
-            {/* Tabs */}
-            <div style={{backgroundColor:"#fff",borderBottom:"1px solid #e2e8f0",display:"flex",padding:"0 16px",flexShrink:0,overflowX:"auto"}}>
-              {TABS.map(tab=>(
-                <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
-                  style={{padding:"11px 13px",border:"none",background:"none",cursor:"pointer",fontWeight:700,fontSize:12,whiteSpace:"nowrap",
-                    color:activeTab===tab.id?"#2563eb":"#94a3b8",
-                    borderBottom:activeTab===tab.id?"2px solid #2563eb":"2px solid transparent",marginBottom:-1}}>
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Content */}
-            <div style={{flex:1,overflowY:"auto",padding:20}}>
-              {activeTab==="ficha"&&<PatientForm patient={sel} onChange={handleChange}/>}
-              {activeTab==="odontograma"&&(
-                <OdontogramPanel
-                  teeth={sel.teeth||{}} milkTeeth={sel.milkTeeth||{}}
-                  patient={sel} onChange={handleChange}
-                  onTeethChange={t=>handleChange({...sel,teeth:t,updatedAt:new Date().toISOString()})}
-                  onMilkChange={t=>handleChange({...sel,milkTeeth:t,updatedAt:new Date().toISOString()})}
-                />
-              )}
-              {activeTab==="evolucion"&&<EvolutionPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="imagenes"&&<ImagesPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="presupuestos"&&<BudgetPanel patient={sel} onChange={handleChange} currentProf={profData}/>}
-              {activeTab==="pagos"&&<PaymentsPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="turnos"&&<AppointmentsPanel patient={sel} onChange={handleChange} currentProf={profData} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);}}/>}
-            </div>
-          </>
-        ):(
-          <div style={{flex:1,overflowY:"auto"}}>
-            {dashboardView==="estadisticas"?(
-              <StatsPanel currentProf={profData} patients={patients}/>
-            ):(
-              <Dashboard currentProf={profData} patients={patients} allPatients={allPatients}
-                onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}
-                onCreatePendingPatient={handleCreatePendingPatient}/>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function RootApp(){
-  const [currentProf,setCurrentProf]=useState(null);
-  const [profNames,setProfNames]=useState({});
-
-  const handleLogin=(prof,names,genders={})=>{
-    // Aplicar nombre personalizado y género al objeto del profesional
-    const displayProf={...prof, name: names[prof.id]||prof.name, gender: genders[prof.id]||"dr"};
-    setCurrentProf(displayProf);
-    setProfNames(names);
-  };
-  const handleLogout=()=>{setCurrentProf(null);};
-
-  if(!currentProf) return <LoginScreen onLogin={handleLogin}/>;
-  return <DentalApp currentProf={currentProf} onLogout={handleLogout}/>;
-}
+  
