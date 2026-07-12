@@ -831,9 +831,15 @@ Quería recordarte que tenés turno el ${dayName} ${dateStr} a las ${appointment
 Por favor confirmá tu asistencia. ✅
 ¡Te esperamos! 😁`;
 
-  // Usar el teléfono del paciente si tiene, si no el del consultorio
-  const phone=(patientPhone||"").replace(/\D/g,"")||CONSULTORIO_WA_NUM;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+  // Normalizar número: agregar código de país 54 (Argentina) si no lo tiene
+  let rawPhone=(patientPhone||"").replace(/\D/g,"")||CONSULTORIO_WA_NUM;
+  if(rawPhone && !rawPhone.startsWith("54")){
+    // Si empieza con 0 (ej: 02923123456) → quitar 0 y agregar 54
+    if(rawPhone.startsWith("0")) rawPhone="54"+rawPhone.slice(1);
+    // Si ya tiene 9 de celular o directo con área → agregar 54
+    else rawPhone="54"+rawPhone;
+  }
+  return `https://wa.me/${rawPhone}?text=${encodeURIComponent(msg)}`;
 };
 const roundTo=( n,r)=>r>0?Math.round(n/r)*r:Math.round(n);
 
@@ -3477,42 +3483,4 @@ function DentalApp({currentProf,onLogout}){
                   onMilkChange={t=>handleChange({...sel,milkTeeth:t,updatedAt:new Date().toISOString()})}
                 />
               )}
-              {activeTab==="evolucion"&&<EvolutionPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="imagenes"&&<ImagesPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="presupuestos"&&<BudgetPanel patient={sel} onChange={handleChange} currentProf={profData}/>}
-              {activeTab==="pagos"&&<PaymentsPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="turnos"&&<AppointmentsPanel patient={sel} onChange={handleChange} currentProf={profData} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);}}/>}
-            </div>
-          </>
-        ):(
-          <div style={{flex:1,overflowY:"auto"}}>
-            {dashboardView==="estadisticas"?(
-              <StatsPanel currentProf={profData} patients={patients}/>
-            ):(
-              <Dashboard currentProf={profData} patients={patients} allPatients={allPatients}
-                onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}
-                onCreatePendingPatient={handleCreatePendingPatient}/>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── ROOT ─────────────────────────────────────────────────────────────────────
-export default function RootApp(){
-  const [currentProf,setCurrentProf]=useState(null);
-  const [profNames,setProfNames]=useState({});
-
-  const handleLogin=(prof,names,genders={})=>{
-    // Aplicar nombre personalizado y género al objeto del profesional
-    const displayProf={...prof, name: names[prof.id]||prof.name, gender: genders[prof.id]||"dr"};
-    setCurrentProf(displayProf);
-    setProfNames(names);
-  };
-  const handleLogout=()=>{setCurrentProf(null);};
-
-  if(!currentProf) return <LoginScreen onLogin={handleLogin}/>;
-  return <DentalApp currentProf={currentProf} onLogout={handleLogout}/>;
-}
+  
