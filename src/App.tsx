@@ -776,7 +776,7 @@ function ImagesPanel({patient,onChange}){
 
 // ─── HELPER: generar schedule de cobros desde un presupuesto ────────────────
 // Modos: "contado" | "anticipo_cuotas"
-// anticipo_cuotas: anticipo (mín 50%) + N cuotas mensuales sobre el saldo
+// anticipo_cuotas: anticipo (% libre, por defecto 50%) + N cuotas mensuales sobre el saldo
 function generarCuotas(budget, total){
   const pmt = budget.payment || {mode:"contado"};
   const schedule = [];
@@ -894,23 +894,23 @@ function PaymentBlock({total,payment,onChange}){
 
           {/* Anticipo */}
           <div style={{backgroundColor:"#fff",borderRadius:8,border:"1px solid #e2e8f0",padding:"12px 14px"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",marginBottom:8}}>Anticipo <span style={{color:"#94a3b8",fontWeight:400,textTransform:"none"}}>(mínimo 50%)</span></div>
+            <div style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",marginBottom:8}}>Anticipo <span style={{color:"#94a3b8",fontWeight:400,textTransform:"none"}}>(por defecto 50% — editable)</span></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
               <div>
                 <label style={ls}>Porcentaje %</label>
-                <input type="number" value={p.anticipoPct} min={50} max={100}
+                <input type="number" value={p.anticipoPct} min={0} max={100}
                   onChange={e=>{
-                    const pct=Math.max(50,Math.min(100,parseFloat(e.target.value)||50));
+                    const pct=Math.min(100,Math.max(0,parseFloat(e.target.value)||0));
                     onChange({...p,anticipoPct:pct,anticipoAmt:Math.round(total*pct/100)});
                   }}
                   style={{...is,padding:"8px 10px"}}/>
               </div>
               <div>
                 <label style={ls}>Monto $</label>
-                <input type="number" value={anticipoAmt} min={Math.round(total*0.5)}
+                <input type="number" value={anticipoAmt} min={0}
                   onChange={e=>{
-                    const amt=Math.max(Math.round(total*0.5),parseFloat(e.target.value)||0);
-                    onChange({...p,anticipoAmt:amt,anticipoPct:total>0?Math.round(amt/total*100):50});
+                    const amt=Math.max(0,parseFloat(e.target.value)||0);
+                    onChange({...p,anticipoAmt:amt,anticipoPct:total>0?Math.round(amt/total*100):0});
                   }}
                   style={{...is,padding:"8px 10px"}}/>
               </div>
@@ -3483,4 +3483,42 @@ function DentalApp({currentProf,onLogout}){
                   onMilkChange={t=>handleChange({...sel,milkTeeth:t,updatedAt:new Date().toISOString()})}
                 />
               )}
-  
+              {activeTab==="evolucion"&&<EvolutionPanel patient={sel} onChange={handleChange}/>}
+              {activeTab==="imagenes"&&<ImagesPanel patient={sel} onChange={handleChange}/>}
+              {activeTab==="presupuestos"&&<BudgetPanel patient={sel} onChange={handleChange} currentProf={profData}/>}
+              {activeTab==="pagos"&&<PaymentsPanel patient={sel} onChange={handleChange}/>}
+              {activeTab==="turnos"&&<AppointmentsPanel patient={sel} onChange={handleChange} currentProf={profData} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);}}/>}
+            </div>
+          </>
+        ):(
+          <div style={{flex:1,overflowY:"auto"}}>
+            {dashboardView==="estadisticas"?(
+              <StatsPanel currentProf={profData} patients={patients}/>
+            ):(
+              <Dashboard currentProf={profData} patients={patients} allPatients={allPatients}
+                onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}
+                onCreatePendingPatient={handleCreatePendingPatient}/>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
+export default function RootApp(){
+  const [currentProf,setCurrentProf]=useState(null);
+  const [profNames,setProfNames]=useState({});
+
+  const handleLogin=(prof,names,genders={})=>{
+    // Aplicar nombre personalizado y género al objeto del profesional
+    const displayProf={...prof, name: names[prof.id]||prof.name, gender: genders[prof.id]||"dr"};
+    setCurrentProf(displayProf);
+    setProfNames(names);
+  };
+  const handleLogout=()=>{setCurrentProf(null);};
+
+  if(!currentProf) return <LoginScreen onLogin={handleLogin}/>;
+  return <DentalApp currentProf={currentProf} onLogout={handleLogout}/>;
+}
