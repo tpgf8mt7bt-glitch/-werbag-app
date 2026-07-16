@@ -1734,6 +1734,14 @@ function AgendaPanel({patient,onChange,currentProf,allPatients,onSelectPatient})
     await saveAppts(appointments.filter(a=>a.id!==id));
   };
 
+  const toggleAttendance=async(id,status)=>{
+    // status: "attended" | "absent" | null (toggle off)
+    const updated=appointments.map(a=>a.id===id
+      ?{...a,attendance:a.attendance===status?null:status}
+      :a);
+    await saveAppts(updated);
+  };
+
   // Calendario
   const [year,month]=viewDate.split("-").map(Number);
   const firstDay=new Date(year,month-1,1).getDay();
@@ -2624,11 +2632,11 @@ function Dashboard({currentProf,patients,allPatients,onSelectPatient,onCreatePen
   };
   const getPatientData=id=>(allPatients||[]).find(x=>x.id===id);
 
-  const weekAppts=appointments
+  const weekApptsAll=appointments
     .filter(a=>{const d=new Date(a.date+"T12:00:00");const t=new Date(today+"T12:00:00");
       const diff=(d-t)/(1000*60*60*24);return diff>0&&diff<=6;})
-    .sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))
-    .slice(0,5);
+    .sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+  const weekAppts=weekApptsAll.slice(0,5);
 
   const drTitle=currentProf.gender==="dra"?"Dra.":"Dr.";
   const hour=new Date().getHours();
@@ -2713,7 +2721,7 @@ function Dashboard({currentProf,patients,allPatients,onSelectPatient,onCreatePen
         {[
           {label:"Pacientes",value:patients.length,icon:"👥",color:"#2563eb",bg:"#eff6ff"},
           {label:"Turnos hoy",value:todayAppts.length,icon:"📅",color:"#059669",bg:"#f0fdf4"},
-          {label:"Esta semana",value:weekAppts.length,icon:"📆",color:"#d97706",bg:"#fffbeb"},
+          {label:"Esta semana",value:weekApptsAll.length,icon:"📆",color:"#d97706",bg:"#fffbeb"},
         ].map(({label,value,icon,color,bg})=>(
           <div key={label} style={{backgroundColor:bg,borderRadius:12,padding:"14px",border:`1px solid ${color}22`,textAlign:"center"}}>
             <div style={{fontSize:22}}>{icon}</div>
@@ -2853,9 +2861,11 @@ function Dashboard({currentProf,patients,allPatients,onSelectPatient,onCreatePen
           const isPending=pat?.pending;
           return(
             <div key={a.id}
-              style={{backgroundColor:"#fff",borderRadius:10,padding:"12px 16px",marginBottom:8,
-                border:"1px solid #e2e8f0",borderLeft:`4px solid ${isPending?"#7c3aed":"#2563eb"}`,
-                display:"flex",alignItems:"center",gap:12}}>
+              style={{backgroundColor:a.attendance==="attended"?"#f0fdf4":a.attendance==="absent"?"#fef2f2":"#fff",
+                borderRadius:10,padding:"12px 16px",marginBottom:8,
+                border:`1px solid ${a.attendance==="attended"?"#86efac":a.attendance==="absent"?"#fca5a5":"#e2e8f0"}`,
+                borderLeft:`4px solid ${a.attendance==="attended"?"#16a34a":a.attendance==="absent"?"#ef4444":isPending?"#7c3aed":"#2563eb"}`,
+                display:"flex",alignItems:"center",gap:12,transition:"all 0.2s"}}>
               <div onClick={()=>pat&&onSelectPatient(a.patientId)}
                 style={{backgroundColor:isPending?"#f5f3ff":"#eff6ff",borderRadius:8,padding:"8px 10px",
                   textAlign:"center",flexShrink:0,minWidth:52,cursor:pat?"pointer":"default"}}>
@@ -2872,29 +2882,50 @@ function Dashboard({currentProf,patients,allPatients,onSelectPatient,onCreatePen
                 {a.notes&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}>{a.notes}</div>}
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
+                {/* Botones asistencia */}
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>toggleAttendance(a.id,"attended")}
+                    title="Asistió"
+                    style={{width:30,height:30,borderRadius:7,border:`2px solid ${a.attendance==="attended"?"#16a34a":"#e2e8f0"}`,
+                      backgroundColor:a.attendance==="attended"?"#16a34a":"#fff",
+                      color:a.attendance==="attended"?"#fff":"#94a3b8",
+                      fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    ✓
+                  </button>
+                  <button onClick={()=>toggleAttendance(a.id,"absent")}
+                    title="No asistió"
+                    style={{width:30,height:30,borderRadius:7,border:`2px solid ${a.attendance==="absent"?"#ef4444":"#e2e8f0"}`,
+                      backgroundColor:a.attendance==="absent"?"#ef4444":"#fff",
+                      color:a.attendance==="absent"?"#fff":"#94a3b8",
+                      fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    ✕
+                  </button>
+                </div>
                 {pat?.phone&&(
                   <button onClick={()=>window.open(buildWAReminderUrl(pat.phone,pat.firstName,a.date,a.time),"_blank")}
                     title="Enviar recordatorio por WhatsApp"
-                    style={{padding:"5px 8px",borderRadius:7,border:"1px solid #25d366",
+                    style={{padding:"3px 6px",borderRadius:7,border:"1px solid #25d366",
                       backgroundColor:"#f0fdf4",color:"#16a34a",fontWeight:700,
-                      fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
-                    <span style={{fontSize:13}}>📱</span>WA
+                      fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}>
+                    <span style={{fontSize:11}}>📱</span>WA
                   </button>
                 )}
-                <button onClick={()=>{
-                    setSelectedDay(a.date);
-                    setQuickForm({time:a.time,duration:a.duration||30,notes:a.notes||"",patientId:a.patientId,newFirstName:"",newLastName:"",newPhone:""});
-                    setQuickMode("existing");
-                    setEditingDashApptId(a.id);
-                    setShowQuickForm(true);
-                  }}
-                  title="Editar turno"
-                  style={{padding:"4px 7px",borderRadius:6,border:"1px solid #f59e0b",
-                    backgroundColor:"#fffbeb",color:"#d97706",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                  ✏️
-                </button>
-                <button onClick={()=>delAppt(a.id)} style={{background:"none",border:"none",
-                  cursor:"pointer",color:"#94a3b8",fontSize:16,flexShrink:0}}>🗑</button>
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>{
+                      setSelectedDay(a.date);
+                      setQuickForm({time:a.time,duration:a.duration||30,notes:a.notes||"",patientId:a.patientId,newFirstName:"",newLastName:"",newPhone:""});
+                      setQuickMode("existing");
+                      setEditingDashApptId(a.id);
+                      setShowQuickForm(true);
+                    }}
+                    title="Editar turno"
+                    style={{flex:1,padding:"3px 6px",borderRadius:6,border:"1px solid #f59e0b",
+                      backgroundColor:"#fffbeb",color:"#d97706",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                    ✏️
+                  </button>
+                  <button onClick={()=>delAppt(a.id)}
+                    style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:15}}>🗑</button>
+                </div>
               </div>
             </div>
           );
