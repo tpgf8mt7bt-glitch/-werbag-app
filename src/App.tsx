@@ -1735,7 +1735,6 @@ function AgendaPanel({patient,onChange,currentProf,allPatients,onSelectPatient})
   };
 
   const toggleAttendance=async(id,status)=>{
-    // status: "attended" | "absent" | null (toggle off)
     const updated=appointments.map(a=>a.id===id
       ?{...a,attendance:a.attendance===status?null:status}
       :a);
@@ -2632,11 +2631,15 @@ function Dashboard({currentProf,patients,allPatients,onSelectPatient,onCreatePen
   };
   const getPatientData=id=>(allPatients||[]).find(x=>x.id===id);
 
+  // Semana actual: lunes a domingo
+  const getMonday=(d)=>{const dt=new Date(d+"T12:00:00");const day=dt.getDay();const diff=dt.getDate()-(day===0?6:day-1);return new Date(dt.setDate(diff)).toISOString().slice(0,10);};
+  const getSunday=(d)=>{const dt=new Date(d+"T12:00:00");const day=dt.getDay();const diff=dt.getDate()+(day===0?0:7-day);return new Date(dt.setDate(diff)).toISOString().slice(0,10);};
+  const weekStart=getMonday(today);
+  const weekEnd=getSunday(today);
   const weekApptsAll=appointments
-    .filter(a=>{const d=new Date(a.date+"T12:00:00");const t=new Date(today+"T12:00:00");
-      const diff=(d-t)/(1000*60*60*24);return diff>0&&diff<=6;})
+    .filter(a=>a.date>=weekStart&&a.date<=weekEnd)
     .sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
-  const weekAppts=weekApptsAll.slice(0,5);
+  const weekAppts=weekApptsAll.filter(a=>a.date>=today).slice(0,5);
 
   const drTitle=currentProf.gender==="dra"?"Dra.":"Dr.";
   const hour=new Date().getHours();
@@ -2699,6 +2702,13 @@ function Dashboard({currentProf,patients,allPatients,onSelectPatient,onCreatePen
 
   const delAppt=async id=>{
     await saveAppts(appointments.filter(a=>a.id!==id));
+  };
+
+  const toggleAttendance=async(id,status)=>{
+    const updated=appointments.map(a=>a.id===id
+      ?{...a,attendance:a.attendance===status?null:status}
+      :a);
+    await saveAppts(updated);
   };
 
   const patientPool=allPatients||[];
@@ -3235,6 +3245,165 @@ function StatsPanel({currentProf,patients}){
   );
 }
 
+
+// ─── PAGOS PENDIENTES PANEL ───────────────────────────────────────────────────
+function PendingPaymentsPanel({patients,allPatients,onSelectPatient}){
+  const today=new Date().toISOString().slice(0,10);
+
+  // Recolectar todas las cuotas pendientes de todos los pacientes
+  const pendingItems=[];
+  (patients||[]).forEach(pat=>{
+    (pat.payments||[]).forEach(pay=>{
+      if(pay.tipo!=="pendiente"||pay.pagado) return;
+      if(!pay.amount) return;
+      const venc=pay.vencimiento||"";
+      const isVenc=venc&&venc<today;
+      pendingItems.push({
+        patientId:pat.id,
+        patientName:`${pat.lastName||""}, ${pat.firstName||""}`.trim()||"Sin nombre",
+        patientPhone:pat.phone||"",
+        paymentId:pay.id,
+        label:pay.label||pay.concept||"Cuota",
+        amount:parseFloat(pay.amount)||0,
+        vencimiento:venc,
+        isVencida:isVenc,
+        budgetTitle:(pat.budgets||[]).find(b=>b.id===pay.budgetId)?.title||"",
+      });
+    });
+  });
+
+  // Ordenar: vencidas primero, luego por fecha
+  pendingItems.sort((a,b)=>{
+    if(a.isVencida&&!b.isVencida) return -1;
+    if(!a.isVencida&&b.isVencida) return 1;
+    return (a.vencimiento||"").localeCompare(b.vencimiento||"");
+  });
+
+  const totalPendiente=pendingItems.reduce((s,i)=>s+i.amount,0);
+  const vencidas=pendingItems.filter(i=>i.isVencida);
+  const porVencer=pendingItems.filter(i=>!i.isVencida);
+
+  const buildWAPaymentMsg=(item)=>{
+    const nombre=item.patientName.split(",")[1]?.trim()||item.patientName;
+    const fechaStr=item.vencimiento
+      ?new Date(item.vencimiento+"T12:00:00").toLocaleDateString("es-AR",{day:"numeric",month:"long"})
+      :"próxima";
+    const msg=
+`Hola ${nombre}! 😊 Soy Lean de Odontología Werbag 🦷
+Te recordamos que tenés un pago pendiente:
+📋 ${item.label}${item.budgetTitle?" — "+item.budgetTitle:""}
+💰 Monto: $${item.amount.toLocaleString("es-AR",{maximumFractionDigits:0})}
+📅 Vencimiento: ${fechaStr}
+Por favor coordiná el pago a la brevedad. ✅
+¡Muchas gracias! 😁`;
+    let phone=(item.patientPhone||"").replace(/\D/g,"")||"5492213181572";
+    if(phone&&!phone.startsWith("54")){
+      phone=phone.startsWith("0")?"54"+phone.slice(1):"54"+phone;
+    }
+    return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+  };
+
+  const Section=({title,items,color,bg,border})=>(
+    items.length===0?null:(
+      <div style={{marginBottom:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color}}>{title}</div>
+          <span style={{backgroundColor:bg,color,border:`1px solid ${border}`,
+            padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>
+            {items.length}
+          </span>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {items.map((item,idx)=>(
+            <div key={`${item.patientId}-${item.paymentId}`}
+              style={{backgroundColor:"#fff",borderRadius:10,padding:"12px 14px",
+                border:`1px solid ${border}`,borderLeft:`4px solid ${color}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>onSelectPatient(item.patientId)}>
+                  <div style={{fontWeight:700,fontSize:13,color:"#1e293b",
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {item.patientName}
+                  </div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <span>{item.label}</span>
+                    {item.budgetTitle&&<span style={{color:"#7c3aed"}}>📄 {item.budgetTitle}</span>}
+                    {item.vencimiento&&<span style={{color:item.isVencida?"#ef4444":"#64748b"}}>
+                      📅 {new Date(item.vencimiento+"T12:00:00").toLocaleDateString("es-AR",{day:"numeric",month:"short",year:"numeric"})}
+                    </span>}
+                  </div>
+                </div>
+                <div style={{fontWeight:800,fontSize:15,color,flexShrink:0}}>
+                  ${item.amount.toLocaleString("es-AR",{maximumFractionDigits:0})}
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  {item.patientPhone&&(
+                    <button onClick={()=>window.open(buildWAPaymentMsg(item),"_blank")}
+                      title="Recordatorio de pago por WhatsApp"
+                      style={{padding:"6px 10px",borderRadius:7,border:"1px solid #25d366",
+                        backgroundColor:"#f0fdf4",color:"#16a34a",fontWeight:700,
+                        fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:13}}>📱</span>Recordar
+                    </button>
+                  )}
+                  <button onClick={()=>onSelectPatient(item.patientId)}
+                    title="Ver ficha del paciente"
+                    style={{padding:"6px 10px",borderRadius:7,border:"1px solid #e2e8f0",
+                      backgroundColor:"#f8fafc",color:"#64748b",fontWeight:700,
+                      fontSize:11,cursor:"pointer"}}>
+                    Ver ficha
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  );
+
+  return(
+    <div style={{padding:20,maxWidth:760,margin:"0 auto"}}>
+      {/* Header */}
+      <div style={{marginBottom:20,padding:"18px 24px",
+        background:"linear-gradient(135deg,#ef4444 0%,#dc2626 100%)",
+        borderRadius:16,color:"#fff"}}>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.8)",marginBottom:4}}>Panel privado</div>
+        <div style={{fontSize:20,fontWeight:800}}>💸 Pagos Pendientes</div>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginTop:4}}>
+          Cuotas vencidas y próximas a vencer de tus pacientes
+        </div>
+      </div>
+
+      {/* Resumen */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+        {[
+          {label:"Total pendiente",value:`$${totalPendiente.toLocaleString("es-AR",{maximumFractionDigits:0})}`,color:"#ef4444",bg:"#fef2f2"},
+          {label:"Cuotas vencidas",value:vencidas.length,color:"#dc2626",bg:"#fee2e2"},
+          {label:"Por vencer",value:porVencer.length,color:"#f59e0b",bg:"#fffbeb"},
+        ].map(({label,value,color,bg})=>(
+          <div key={label} style={{backgroundColor:bg,borderRadius:12,padding:"14px",textAlign:"center",border:`1px solid ${color}22`}}>
+            <div style={{fontSize:20,fontWeight:800,color}}>{value}</div>
+            <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {pendingItems.length===0?(
+        <div style={{padding:40,textAlign:"center",backgroundColor:"#f0fdf4",borderRadius:12,border:"1px solid #bbf7d0"}}>
+          <div style={{fontSize:36,marginBottom:8}}>✅</div>
+          <div style={{fontWeight:700,fontSize:15,color:"#166534"}}>¡Sin pagos pendientes!</div>
+          <div style={{fontSize:13,color:"#16a34a",marginTop:4}}>Todos los pacientes están al día</div>
+        </div>
+      ):(
+        <>
+          <Section title="⚠️ Cuotas vencidas" items={vencidas} color="#ef4444" bg="#fee2e2" border="#fca5a5"/>
+          <Section title="📅 Por vencer" items={porVencer} color="#f59e0b" bg="#fffbeb" border="#fde68a"/>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const TABS=[
   {id:"ficha",label:"📋 Ficha"},
@@ -3255,7 +3424,7 @@ function DentalApp({currentProf,onLogout}){
   const [loading,setLoading]=useState(true);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [showProfile,setShowProfile]=useState(false);
-  const [dashboardView,setDashboardView]=useState("inicio"); // "inicio" | "estadisticas"
+  const [dashboardView,setDashboardView]=useState("inicio"); // "inicio" | "estadisticas" | "pagos_pendientes"
   const [profData,setProfData]=useState(currentProf);
   const [waMsgModal,setWaMsgModal]=useState(null); // {patient, ownerProf} o null
   const [confirmDel,setConfirmDel]=useState(null); // {msg, onOk} o null
@@ -3454,6 +3623,15 @@ function DentalApp({currentProf,onLogout}){
               display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
             📊 Estadísticas
           </button>
+          <button onClick={()=>{setSelectedId(null);setDashboardView("pagos_pendientes");setSidebarOpen(false);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:9,
+              border:!selectedId&&dashboardView==="pagos_pendientes"?"2px solid #ef4444":"2px solid #e2e8f0",
+              backgroundColor:!selectedId&&dashboardView==="pagos_pendientes"?"#fef2f2":"#fff",
+              color:!selectedId&&dashboardView==="pagos_pendientes"?"#ef4444":"#64748b",
+              fontWeight:700,fontSize:12,cursor:"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            💸 Pagos Pendientes
+          </button>
         </div>
         {loading?<div style={{padding:24,textAlign:"center",color:"#94a3b8"}}>Cargando...</div>
           :<PatientList patients={patients} allPatients={allPatients} onSelect={handleSelect} onNew={handleNew} selectedId={selectedId} currentProfId={currentProf.id}/>}
@@ -3525,6 +3703,8 @@ function DentalApp({currentProf,onLogout}){
           <div style={{flex:1,overflowY:"auto"}}>
             {dashboardView==="estadisticas"?(
               <StatsPanel currentProf={profData} patients={patients}/>
+            ):dashboardView==="pagos_pendientes"?(
+              <PendingPaymentsPanel patients={patients} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}/>
             ):(
               <Dashboard currentProf={profData} patients={patients} allPatients={allPatients}
                 onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}
