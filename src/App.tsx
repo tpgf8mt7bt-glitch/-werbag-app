@@ -58,18 +58,12 @@ const sSet = async (k, v) => {
 const sList = async prefix => {
   try {
     const col = prefix.replace(/:$/,"").replace(/:/g,"__");
-    const allDocs = [];
-    let pageToken = null;
-    do {
-      const url = `${FB_BASE}/${col}?key=${FB_API_KEY}&pageSize=300${pageToken?`&pageToken=${pageToken}`:""}`;
-      const res = await fetch(url);
-      if(!res.ok) break;
-      const data = await res.json();
-      const docs = data?.documents || [];
-      allDocs.push(...docs);
-      pageToken = data.nextPageToken || null;
-    } while(pageToken);
-    const keys = allDocs.map(d => {
+    const url = `${FB_BASE}/${col}?key=${FB_API_KEY}`;
+    const res = await fetch(url);
+    if(!res.ok) return { keys:[] };
+    const data = await res.json();
+    const docs = data?.documents || [];
+    const keys = docs.map(d => {
       const kField = d?.fields?._k?.stringValue;
       if(kField) return kField;
       // Fallback: extraer id del nombre del doc
@@ -106,6 +100,7 @@ const CONDITIONS = {
   leaking:    { label:"Filtrado"       },
   extraction: { label:"Extracción"     },
   missing:    { label:"Ausente"        },
+  crown:      { label:"Corona"         },
 };
 
 const COMMON_PATHOLOGIES = ["Diabetes","Hipertensión","Cardiopatía","Asma","Epilepsia","HIV/SIDA","Hepatitis","Osteoporosis","Hipotiroidismo","Hipertiroidismo","Embarazo","Coagulopatía","Insuficiencia renal","Cáncer","Artritis reumatoide"];
@@ -113,9 +108,10 @@ const COMMON_MEDICATIONS  = ["Anticoagulantes","Antihipertensivos","Corticoides"
 const COMMON_ALLERGIES    = ["Penicilina","Amoxicilina","Lidocaína","Látex","AINES","Aspirina","Cefalosporinas","Sulfas","Yodo","Anestesia local"];
 const COMMON_TREATMENTS   = ["Obturación composite","Obturación amalgama","Endodoncia","Extracción simple","Extracción quirúrgica","Corona porcelana","Corona metal","Implante","Limpieza profunda","Pulpotomía","Sellador de fosas","Carilla","Blanqueamiento","Puente fijo","Prótesis removible"];
 
-const emptyPatient = (professionalId="") => ({
+const emptyPatient = (professionalId="", overrides={}) => ({
   id: Date.now().toString(),
   professionalId,
+  pending:false, // true = creado rápido desde agenda, ficha incompleta
   firstName:"",lastName:"",dni:"",cuit:"",birthDate:"",gender:"",
   phone:"",email:"",address:"",occupation:"",
   obraSocial:"",nroAfiliado:"",
@@ -124,6 +120,7 @@ const emptyPatient = (professionalId="") => ({
   teeth:{}, milkTeeth:{},
   evolution:[], images:[], budgets:[], payments:[],
   createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
+  ...overrides,
 });
 
 // ─── STYLES ──────────────────────────────────────────────────────────────────
@@ -180,8 +177,9 @@ function ToothSVG({number,data={},onClick,size=56}){
   const pts=arr=>arr.map(p=>p.join(",")).join(" ");
   const gc=s=>{const v=surf[s];return v==="done"?"#ef4444":v==="todo"?"#2563eb":"white";};
   const go=s=>surf[s]?0.82:0;
-  const isMissing=condition==="missing",isExt=condition==="extraction",isLeak=condition==="leaking";
+  const isMissing=condition==="missing",isExt=condition==="extraction",isLeak=condition==="leaking",isCrown=condition==="crown";
   const lw=Math.max(2,S*0.045);
+  const markColor=data.markColor==="azul"?"#2563eb":"#ef4444"; // rojo por defecto
   return(
     <div onClick={()=>onClick(number)} style={{display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer",gap:2,userSelect:"none"}}>
       <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`}
@@ -192,14 +190,20 @@ function ToothSVG({number,data={},onClick,size=56}){
         {SURFACES.map(s=><polygon key={s} points={pts(zones[s])} fill={gc(s)} fillOpacity={go(s)} stroke="#e2e8f0" strokeWidth={0.5}/>)}
         <rect x={C-inn} y={C-inn} width={inn*2} height={inn*2} fill="none" stroke="#94a3b8" strokeWidth={0.8}/>
         <rect x={pad} y={pad} width={S-pad*2} height={S-pad*2} rx={3} fill="none" stroke="#94a3b8" strokeWidth={1.5}/>
-        {isMissing&&<><line x1={pad+3} y1={pad+3} x2={S-pad-3} y2={S-pad-3} stroke="#ef4444" strokeWidth={lw} strokeLinecap="round"/>
-          <line x1={S-pad-3} y1={pad+3} x2={pad+3} y2={S-pad-3} stroke="#ef4444" strokeWidth={lw} strokeLinecap="round"/></>}
+        {isMissing&&<><line x1={pad+3} y1={pad+3} x2={S-pad-3} y2={S-pad-3} stroke={markColor} strokeWidth={lw} strokeLinecap="round"/>
+          <line x1={S-pad-3} y1={pad+3} x2={pad+3} y2={S-pad-3} stroke={markColor} strokeWidth={lw} strokeLinecap="round"/></>}
         {isExt&&<><line x1={pad+3} y1={C-4} x2={S-pad-3} y2={C-4} stroke="#2563eb" strokeWidth={lw} strokeLinecap="round"/>
           <line x1={pad+3} y1={C+4} x2={S-pad-3} y2={C+4} stroke="#2563eb" strokeWidth={lw} strokeLinecap="round"/></>}
         {isLeak&&<><circle cx={C} cy={C} r={S*0.18} fill="none" stroke="#ef4444" strokeWidth={lw}/>
           <circle cx={C} cy={C} r={S*0.07} fill="#2563eb"/></>}
+        {isCrown&&<circle cx={C} cy={C} r={S*0.36} fill="none" stroke={markColor} strokeWidth={lw}/>}
+        {data.treated&&<>
+          <rect x={pad} y={pad} width={S-pad*2} height={S-pad*2} rx={3} fill="#22c55e" fillOpacity={0.18}/>
+          <polyline points={`${C-S*0.18},${C} ${C-S*0.04},${C+S*0.18} ${C+S*0.22},${C-S*0.16}`}
+            fill="none" stroke="#16a34a" strokeWidth={Math.max(2.5,lw*1.2)} strokeLinecap="round" strokeLinejoin="round"/>
+        </>}
       </svg>
-      <span style={{fontSize:Math.max(7,S*0.14),color:"#6b7280",fontWeight:700,letterSpacing:0.2}}>{number}</span>
+      <span style={{fontSize:Math.max(7,S*0.14),color:data.treated?"#16a34a":"#6b7280",fontWeight:700,letterSpacing:0.2}}>{number}</span>
     </div>
   );
 }
@@ -212,6 +216,7 @@ function ToothModal({number,data={},onSave,onClose}){
   const [notes,setNotes]=useState(data.notes||"");
   const [treatment,setTreatment]=useState(data.treatment||"");
   const [date,setDate]=useState(data.date||"");
+  const [markColor,setMarkColor]=useState(data.markColor||"rojo"); // "rojo" | "azul" — para Ausente y Corona
   const S=96,C=S/2,pad=9,inn=21;
   const zones={
     oclusal:[[C-inn,C-inn],[C+inn,C-inn],[C+inn,C+inn],[C-inn,C+inn]],
@@ -224,8 +229,10 @@ function ToothModal({number,data={},onSave,onClose}){
   const gc=s=>{const v=surfaces[s];return v==="done"?"#ef4444":v==="todo"?"#2563eb":"white";};
   const go=s=>surfaces[s]?0.8:0;
   const toggleSurf=s=>setSurfaces(prev=>{const n={...prev};n[s]===surfMode?delete n[s]:n[s]=surfMode;return n;});
-  const isMissing=condition==="missing",isExt=condition==="extraction",isLeak=condition==="leaking";
-  const showSurf=!isMissing&&!isExt&&!isLeak;
+  const isMissing=condition==="missing",isExt=condition==="extraction",isLeak=condition==="leaking",isCrown=condition==="crown";
+  const showSurf=!isMissing&&!isExt&&!isLeak&&!isCrown;
+  const showColorPicker=isMissing||isCrown;
+  const pickedColor=markColor==="azul"?"#2563eb":"#ef4444";
   return(
     <div style={{position:"fixed",inset:0,backgroundColor:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
       <div style={{backgroundColor:"#fff",borderRadius:18,padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.3)"}} onClick={e=>e.stopPropagation()}>
@@ -266,13 +273,23 @@ function ToothModal({number,data={},onSave,onClose}){
           </div>
           <p style={{margin:0,fontSize:11,color:"#94a3b8",textAlign:"center"}}>Tocá cada cara para marcarla</p>
         </div>)}
-        {(isMissing||isExt||isLeak)&&(
+        {showColorPicker&&(
+          <div style={{marginBottom:14}}>
+            <label style={ls}>Color de la marca</label>
+            <div style={{display:"flex",gap:6,marginTop:4}}>
+              <button onClick={()=>setMarkColor("rojo")} style={{flex:1,padding:"7px",borderRadius:8,border:`2px solid ${markColor==="rojo"?"#ef4444":"#e2e8f0"}`,backgroundColor:markColor==="rojo"?"#fef2f2":"#fff",color:markColor==="rojo"?"#ef4444":"#64748b",fontWeight:700,fontSize:12,cursor:"pointer"}}>🔴 Rojo</button>
+              <button onClick={()=>setMarkColor("azul")} style={{flex:1,padding:"7px",borderRadius:8,border:`2px solid ${markColor==="azul"?"#2563eb":"#e2e8f0"}`,backgroundColor:markColor==="azul"?"#eff6ff":"#fff",color:markColor==="azul"?"#2563eb":"#64748b",fontWeight:700,fontSize:12,cursor:"pointer"}}>🔵 Azul</button>
+            </div>
+          </div>
+        )}
+        {(isMissing||isExt||isLeak||isCrown)&&(
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
             <svg width={70} height={70} viewBox="0 0 60 60" style={{borderRadius:8,boxShadow:"0 2px 8px rgba(0,0,0,0.1)"}}>
               <rect x={5} y={5} width={50} height={50} rx={4} fill="white" stroke="#94a3b8" strokeWidth={1.5}/>
-              {isMissing&&<><line x1={9} y1={9} x2={51} y2={51} stroke="#ef4444" strokeWidth={3.5} strokeLinecap="round"/><line x1={51} y1={9} x2={9} y2={51} stroke="#ef4444" strokeWidth={3.5} strokeLinecap="round"/></>}
+              {isMissing&&<><line x1={9} y1={9} x2={51} y2={51} stroke={pickedColor} strokeWidth={3.5} strokeLinecap="round"/><line x1={51} y1={9} x2={9} y2={51} stroke={pickedColor} strokeWidth={3.5} strokeLinecap="round"/></>}
               {isExt&&<><line x1={9} y1={24} x2={51} y2={24} stroke="#2563eb" strokeWidth={3} strokeLinecap="round"/><line x1={9} y1={36} x2={51} y2={36} stroke="#2563eb" strokeWidth={3} strokeLinecap="round"/></>}
               {isLeak&&<><circle cx={30} cy={30} r={13} fill="none" stroke="#ef4444" strokeWidth={3}/><circle cx={30} cy={30} r={4.5} fill="#2563eb"/></>}
+              {isCrown&&<circle cx={30} cy={30} r={20} fill="none" stroke={pickedColor} strokeWidth={3.5}/>}
             </svg>
           </div>
         )}
@@ -284,7 +301,7 @@ function ToothModal({number,data={},onSave,onClose}){
           <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Observaciones..." rows={3} style={{...is,resize:"vertical",fontFamily:"inherit"}}/></div>
         <div style={{display:"flex",gap:10}}>
           <button onClick={onClose} style={btnSecondary}>Cancelar</button>
-          <button onClick={()=>onSave(number,{condition,surfaces,notes,treatment,date})} style={{...btnPrimary,flex:1}}>Guardar</button>
+          <button onClick={()=>onSave(number,{condition,surfaces,notes,treatment,date,markColor})} style={{...btnPrimary,flex:1}}>Guardar</button>
         </div>
       </div>
     </div>
@@ -292,7 +309,7 @@ function ToothModal({number,data={},onSave,onClose}){
 }
 
 // ─── ODONTOGRAM PANEL ─────────────────────────────────────────────────────────
-function OdontogramPanel({teeth,milkTeeth,onTeethChange,onMilkChange}){
+function OdontogramPanel({teeth,milkTeeth,onTeethChange,onMilkChange,patient,onChange}){
   const [sel,setSel]=useState(null);
   const [isMilk,setIsMilk]=useState(false);
   const [selTooth,setSelTooth]=useState(null);
@@ -311,7 +328,8 @@ function OdontogramPanel({teeth,milkTeeth,onTeethChange,onMilkChange}){
         {l:"A tratar",el:<rect width={13} height={13} rx={2} fill="#2563eb" fillOpacity={0.8}/>},
         {l:"Filtrado",el:<><circle cx={6.5} cy={6.5} r={5.5} fill="none" stroke="#ef4444" strokeWidth={2}/><circle cx={6.5} cy={6.5} r={2.2} fill="#2563eb"/></>},
         {l:"Extracción",el:<><line x1={1} y1={5} x2={12} y2={5} stroke="#2563eb" strokeWidth={2} strokeLinecap="round"/><line x1={1} y1={8.5} x2={12} y2={8.5} stroke="#2563eb" strokeWidth={2} strokeLinecap="round"/></>},
-        {l:"Ausente",el:<><line x1={1} y1={1} x2={12} y2={12} stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round"/><line x1={12} y1={1} x2={1} y2={12} stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round"/></>},
+        {l:"Ausente (🔴/🔵)",el:<><line x1={1} y1={1} x2={12} y2={12} stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round"/><line x1={12} y1={1} x2={1} y2={12} stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round"/></>},
+        {l:"Corona (🔴/🔵)",el:<circle cx={6.5} cy={6.5} r={5} fill="none" stroke="#ef4444" strokeWidth={2.2}/>},
       ].map(({l,el})=>(
         <span key={l} style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#374151",fontWeight:600}}>
           <svg width={13} height={13} viewBox="0 0 13 13">{el}</svg>{l}
@@ -380,6 +398,189 @@ function OdontogramPanel({teeth,milkTeeth,onTeethChange,onMilkChange}){
       <div style={{marginTop:10,padding:"9px 13px",backgroundColor:"#eff6ff",borderRadius:10,fontSize:12,color:"#3b82f6",fontWeight:600}}>
         💡 Tocá cualquier diente para editar sus superficies, condición y tratamiento
       </div>
+
+      {/* ── RESUMEN DE PIEZAS A TRATAR ── */}
+      <TreatmentSummary teeth={teeth} milkTeeth={milkTeeth} onTeethChange={onTeethChange} onMilkChange={onMilkChange} patient={patient} onChange={onChange}/>
+    </div>
+  );
+}
+
+// ─── RESUMEN DE PIEZAS A TRATAR ──────────────────────────────────────────────
+function TreatmentSummary({teeth,milkTeeth,onTeethChange,onMilkChange,patient,onChange}){
+  // Detectar piezas que tienen algo "azul" (a tratar):
+  // superficie "todo", condición "leaking" (punto azul), extracción, ausente azul, corona azul
+  const toTreatItems=[];
+
+  const allTeeth=[
+    ...[...UPPER_ADULT,...LOWER_ADULT].map(n=>({n,data:teeth[n]||{},milk:false})),
+    ...[...UPPER_PRIMARY,...LOWER_PRIMARY].map(n=>({n,data:milkTeeth[n]||{},milk:true})),
+  ];
+
+  allTeeth.forEach(({n,data,milk})=>{
+    const c=data.condition||"healthy";
+    const surf=data.surfaces||{};
+    const reasons=[];
+
+    // Superficies azules (a tratar)
+    const cariesTodo=Object.values(surf).filter(v=>v==="todo").length;
+    if(cariesTodo>0) reasons.push(`${cariesTodo} cara${cariesTodo>1?"s":""} a tratar`);
+
+    // Filtrado (punto azul = caries)
+    if(c==="leaking") reasons.push("filtrado / caries");
+
+    // Extracción indicada
+    if(c==="extraction") reasons.push("extracción indicada");
+
+    // Ausente azul
+    if(c==="missing"&&data.markColor==="azul") reasons.push("ausente (a reponer)");
+
+    // Corona azul
+    if(c==="crown"&&data.markColor==="azul") reasons.push("corona indicada");
+
+    if(reasons.length>0){
+      toTreatItems.push({n,data,milk,reasons,treated:data.treated||false});
+    }
+  });
+
+  if(toTreatItems.length===0) return(
+    <div style={{marginTop:16,padding:"14px 16px",backgroundColor:"#f0fdf4",borderRadius:12,
+      border:"1px solid #bbf7d0",display:"flex",alignItems:"center",gap:10}}>
+      <span style={{fontSize:22}}>✅</span>
+      <div>
+        <div style={{fontWeight:700,fontSize:13,color:"#166534"}}>Sin piezas pendientes de tratamiento</div>
+        <div style={{fontSize:12,color:"#16a34a",marginTop:2}}>El odontograma no registra elementos marcados en azul</div>
+      </div>
+    </div>
+  );
+
+  const totalCaries=toTreatItems.reduce((s,i)=>{
+    const surf=i.data.surfaces||{};
+    return s+Object.values(surf).filter(v=>v==="todo").length;
+  },0);
+
+  const pendientes=toTreatItems.filter(i=>!i.treated).length;
+  const tratados=toTreatItems.filter(i=>i.treated).length;
+
+  const toggleTreated=(item)=>{
+    if(!patient||!onChange) return;
+    const newData={...item.data,treated:!item.treated};
+    const newTeeth=item.milk?{...teeth}:{...teeth,[item.n]:newData};
+    const newMilk=item.milk?{...milkTeeth,[item.n]:newData}:{...milkTeeth};
+    const todayStr=new Date().toISOString().slice(0,10);
+    const autoId=`auto-tratamiento-${todayStr}`;
+    const evolution=[...(patient.evolution||[])];
+    const existIdx=evolution.findIndex(e=>e.id===autoId);
+
+    if(!item.treated){
+      // MARCAR como tratado → actualizar diente + evolución en una sola llamada
+      const piezasHoy=existIdx>=0
+        ?(evolution[existIdx].tooth||"").split(",").map(s=>s.trim()).filter(Boolean)
+        :[];
+      if(!piezasHoy.includes(String(item.n))) piezasHoy.push(String(item.n));
+      const toothStr=piezasHoy.join(", ");
+      const noteStr=`Tratamiento realizado — Piezas: ${toothStr}`;
+      if(existIdx>=0){
+        evolution[existIdx]={...evolution[existIdx],tooth:toothStr,note:noteStr};
+      } else {
+        evolution.unshift({id:autoId,date:todayStr,tooth:toothStr,
+          treatment:"Tratamiento odontológico",note:noteStr,professional:"",
+          createdAt:new Date().toISOString(),autoGenerated:true});
+      }
+      onChange({...patient,teeth:newTeeth,milkTeeth:newMilk,evolution,updatedAt:new Date().toISOString()});
+    } else {
+      // DESMARCAR → quitar pieza de evolución + actualizar diente
+      if(existIdx>=0){
+        const piezas=(evolution[existIdx].tooth||"").split(",").map(s=>s.trim()).filter(s=>s&&s!==String(item.n));
+        if(piezas.length===0) evolution.splice(existIdx,1);
+        else{ const ts=piezas.join(", ");evolution[existIdx]={...evolution[existIdx],tooth:ts,note:`Tratamiento realizado — Piezas: ${ts}`};}
+      }
+      onChange({...patient,teeth:newTeeth,milkTeeth:newMilk,evolution,updatedAt:new Date().toISOString()});
+    }
+  };
+
+  return(
+    <div style={{marginTop:16}}>
+      {/* Header resumen */}
+      <div style={{backgroundColor:"#1e293b",borderRadius:"12px 12px 0 0",padding:"12px 16px",
+        display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{color:"#fff",fontWeight:800,fontSize:14}}>📋 Piezas a tratar</div>
+        <div style={{display:"flex",gap:8}}>
+          <span style={{backgroundColor:"#ef4444",color:"#fff",padding:"3px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>
+            {pendientes} pendiente{pendientes!==1?"s":""}
+          </span>
+          {tratados>0&&<span style={{backgroundColor:"#22c55e",color:"#fff",padding:"3px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>
+            {tratados} ✓ tratado{tratados!==1?"s":""}
+          </span>}
+        </div>
+      </div>
+
+      {/* Stats rápidas */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",borderBottom:"1px solid #e2e8f0"}}>
+        {[
+          {label:"Piezas afectadas",value:toTreatItems.length,color:"#2563eb",bg:"#eff6ff"},
+          {label:"Caras con caries",value:totalCaries,color:"#ef4444",bg:"#fef2f2"},
+          {label:"Ya tratadas",value:tratados,color:"#22c55e",bg:"#f0fdf4"},
+        ].map(({label,value,color,bg})=>(
+          <div key={label} style={{padding:"10px 14px",backgroundColor:bg,textAlign:"center",borderRight:"1px solid #e2e8f0"}}>
+            <div style={{fontSize:20,fontWeight:800,color}}>{value}</div>
+            <div style={{fontSize:10,color:"#64748b",fontWeight:600}}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Lista de piezas */}
+      <div style={{border:"1px solid #e2e8f0",borderTop:"none",borderRadius:"0 0 12px 12px",overflow:"hidden"}}>
+        {toTreatItems.map((item,idx)=>(
+          <div key={`${item.n}-${item.milk}`}
+            style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",
+              backgroundColor:item.treated?"#f0fdf4":idx%2===0?"#fff":"#f8fafc",
+              borderBottom:idx<toTreatItems.length-1?"1px solid #f1f5f9":"none",
+              transition:"background 0.2s"}}>
+
+            {/* Número de pieza */}
+            <div style={{width:40,height:40,borderRadius:10,
+              backgroundColor:item.treated?"#dcfce7":"#eff6ff",
+              display:"flex",alignItems:"center",justifyContent:"center",
+              flexShrink:0,position:"relative"}}>
+              <span style={{fontSize:14,fontWeight:800,color:item.treated?"#16a34a":"#2563eb"}}>{item.n}</span>
+              {item.treated&&<div style={{position:"absolute",top:-4,right:-4,width:16,height:16,
+                borderRadius:"50%",backgroundColor:"#22c55e",
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#fff",fontWeight:800}}>✓</div>}
+            </div>
+
+            {/* Descripción */}
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                <span style={{fontWeight:700,fontSize:13,color:item.treated?"#166534":"#1e293b"}}>
+                  Pieza {item.n}{item.milk?" (leche)":""}
+                </span>
+                <span style={{fontSize:10,padding:"2px 6px",borderRadius:6,fontWeight:700,
+                  backgroundColor:item.treated?"#dcfce7":"#fef2f2",
+                  color:item.treated?"#166534":"#ef4444"}}>
+                  {item.treated?"✓ Tratado":"A tratar"}
+                </span>
+              </div>
+              <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>
+                {item.reasons.join(" · ")}
+              </div>
+            </div>
+
+            {/* Botón toggle */}
+            <button onClick={()=>toggleTreated(item)}
+              style={{flexShrink:0,padding:"7px 12px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:700,fontSize:11,
+                backgroundColor:item.treated?"#dcfce7":"#2563eb",
+                color:item.treated?"#166534":"#fff",
+                transition:"all 0.2s"}}>
+              {item.treated?"↩ Deshacer":"✓ Marcar tratado"}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {pendientes>0&&<div style={{marginTop:10,padding:"8px 12px",backgroundColor:"#fffbeb",borderRadius:8,
+        border:"1px solid #fde68a",fontSize:11,color:"#92400e",fontWeight:600}}>
+        ⚠ {pendientes} pieza{pendientes!==1?"s":""} pendiente{pendientes!==1?"s":""} de tratamiento · El tilde verde aparecerá en el odontograma al marcar como tratado
+      </div>}
     </div>
   );
 }
@@ -407,10 +608,15 @@ function EvolutionPanel({patient,onChange}){
     }
     cancelForm();
   };
-  const del=id=>onChange({...patient,evolution:entries.filter(e=>e.id!==id),updatedAt:new Date().toISOString()});
+  const [confirmEvo,setConfirmEvo]=useState(null);
+  const del=id=>setConfirmEvo({msg:"¿Eliminar esta entrada del historial?",onOk:()=>{
+    setConfirmEvo(null);
+    onChange({...patient,evolution:entries.filter(e=>e.id!==id),updatedAt:new Date().toISOString()});
+  }});
 
   return(
     <div>
+      {confirmEvo&&<ConfirmModal msg={confirmEvo.msg} onOk={confirmEvo.onOk} onCancel={()=>setConfirmEvo(null)}/>}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1e293b"}}>📝 Historial de Evolución</h3>
         {!showForm&&<button onClick={openNew} style={btnPrimary}>+ Nueva entrada</button>}
@@ -454,6 +660,7 @@ function EvolutionPanel({patient,onChange}){
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div>
                   <span style={{fontWeight:700,color:"#1e293b",fontSize:14}}>{e.date}</span>
+                      {e.autoGenerated&&<span style={{fontSize:10,backgroundColor:"#eff6ff",color:"#2563eb",padding:"2px 7px",borderRadius:6,fontWeight:700}}>⚙ Auto</span>}
                   {e.tooth&&<span style={{marginLeft:10,backgroundColor:"#eff6ff",color:"#2563eb",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>🦷 {e.tooth}</span>}
                   {e.professional&&<span style={{marginLeft:8,color:"#64748b",fontSize:12}}>· {e.professional}</span>}
                 </div>
@@ -508,11 +715,13 @@ function ImagesPanel({patient,onChange}){
     onChange(updated);
     saveImmediate(updated);
   };
-  const delImg=async id=>{
+  const [confirmImg,setConfirmImg]=useState(null);
+  const delImg=id=>setConfirmImg({msg:"¿Eliminar esta imagen?",onOk:async()=>{
+    setConfirmImg(null);
     const updated={...patient,images:images.filter(i=>i.id!==id),updatedAt:new Date().toISOString()};
     onChange(updated);
     await saveImmediate(updated);
-  };
+  }});
 
   return(
     <div>
@@ -552,6 +761,7 @@ function ImagesPanel({patient,onChange}){
                 </div>
               </div>
               <div style={{padding:8}}>
+      {confirmImg&&<ConfirmModal msg={confirmImg.msg} onOk={confirmImg.onOk} onCancel={()=>setConfirmImg(null)}/>}
                 <input value={img.label} onChange={e=>updateImg(img.id,"label",e.target.value)} placeholder="Etiqueta (ej: RX periapical 16)" style={{...is,padding:"5px 8px",fontSize:11,marginBottom:4}}/>
                 <div style={{fontSize:10,color:"#94a3b8"}}>{img.date}</div>
               </div>
@@ -566,7 +776,7 @@ function ImagesPanel({patient,onChange}){
 
 // ─── HELPER: generar schedule de cobros desde un presupuesto ────────────────
 // Modos: "contado" | "anticipo_cuotas"
-// anticipo_cuotas: anticipo (mín 50%) + N cuotas mensuales sobre el saldo
+// anticipo_cuotas: anticipo (% libre, por defecto 50%) + N cuotas mensuales sobre el saldo
 function generarCuotas(budget, total){
   const pmt = budget.payment || {mode:"contado"};
   const schedule = [];
@@ -604,6 +814,33 @@ function generarCuotas(budget, total){
 
 // ─── BUDGET PANEL ─────────────────────────────────────────────────────────────
 const fmtARS=n=>n.toLocaleString("es-AR",{minimumFractionDigits:0,maximumFractionDigits:0});
+
+// ─── WHATSAPP RECORDATORIO ────────────────────────────────────────────────────
+const CONSULTORIO_WA_NUM = "5492213181572";
+
+const buildWAReminderUrl=(patientPhone,patientFirstName,appointmentDate,appointmentTime)=>{
+  // Formatear fecha legible en español
+  const [y,m,d]=appointmentDate.split("-").map(Number);
+  const dateObj=new Date(y,m-1,d);
+  const dayName=dateObj.toLocaleDateString("es-AR",{weekday:"long"});
+  const dateStr=dateObj.toLocaleDateString("es-AR",{day:"numeric",month:"long"});
+  const nombre=patientFirstName||"";
+  const msg=
+`Hola ${nombre}! 😊 Soy Lean de Odontología Werbag 🦷
+Quería recordarte que tenés turno el ${dayName} ${dateStr} a las ${appointmentTime}hs. ⏰
+Por favor confirmá tu asistencia. ✅
+¡Te esperamos! 😁`;
+
+  // Normalizar número: agregar código de país 54 (Argentina) si no lo tiene
+  let rawPhone=(patientPhone||"").replace(/\D/g,"")||CONSULTORIO_WA_NUM;
+  if(rawPhone && !rawPhone.startsWith("54")){
+    // Si empieza con 0 (ej: 02923123456) → quitar 0 y agregar 54
+    if(rawPhone.startsWith("0")) rawPhone="54"+rawPhone.slice(1);
+    // Si ya tiene 9 de celular o directo con área → agregar 54
+    else rawPhone="54"+rawPhone;
+  }
+  return `https://wa.me/${rawPhone}?text=${encodeURIComponent(msg)}`;
+};
 const roundTo=( n,r)=>r>0?Math.round(n/r)*r:Math.round(n);
 
 function PaymentBlock({total,payment,onChange}){
@@ -657,23 +894,23 @@ function PaymentBlock({total,payment,onChange}){
 
           {/* Anticipo */}
           <div style={{backgroundColor:"#fff",borderRadius:8,border:"1px solid #e2e8f0",padding:"12px 14px"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",marginBottom:8}}>Anticipo <span style={{color:"#94a3b8",fontWeight:400,textTransform:"none"}}>(mínimo 50%)</span></div>
+            <div style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",marginBottom:8}}>Anticipo <span style={{color:"#94a3b8",fontWeight:400,textTransform:"none"}}>(por defecto 50% — editable)</span></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
               <div>
                 <label style={ls}>Porcentaje %</label>
-                <input type="number" value={p.anticipoPct} min={50} max={100}
+                <input type="number" value={p.anticipoPct} min={0} max={100}
                   onChange={e=>{
-                    const pct=Math.max(50,Math.min(100,parseFloat(e.target.value)||50));
+                    const pct=Math.min(100,Math.max(0,parseFloat(e.target.value)||0));
                     onChange({...p,anticipoPct:pct,anticipoAmt:Math.round(total*pct/100)});
                   }}
                   style={{...is,padding:"8px 10px"}}/>
               </div>
               <div>
                 <label style={ls}>Monto $</label>
-                <input type="number" value={anticipoAmt} min={Math.round(total*0.5)}
+                <input type="number" value={anticipoAmt} min={0}
                   onChange={e=>{
-                    const amt=Math.max(Math.round(total*0.5),parseFloat(e.target.value)||0);
-                    onChange({...p,anticipoAmt:amt,anticipoPct:total>0?Math.round(amt/total*100):50});
+                    const amt=Math.max(0,parseFloat(e.target.value)||0);
+                    onChange({...p,anticipoAmt:amt,anticipoPct:total>0?Math.round(amt/total*100):0});
                   }}
                   style={{...is,padding:"8px 10px"}}/>
               </div>
@@ -746,10 +983,25 @@ function PaymentBlock({total,payment,onChange}){
 
 function BudgetPanel({patient,onChange,currentProf}){
   const [showForm,setShowForm]=useState(false);
+  const [editingBudgetId,setEditingBudgetId]=useState(null);
   const emptyDraft=()=>({title:"",date:new Date().toISOString().slice(0,10),items:[],notes:"",showPrices:true,status:"pendiente",payment:{mode:"contado",anticipoPct:50,anticipoAmt:0,cuotas:3,interesPct:0,roundTo:0}});
   const [draft,setDraft]=useState(emptyDraft());
   const [newItem,setNewItem]=useState({description:"",tooth:"",quantity:1,price:""});
   const budgets=patient.budgets||[];
+
+  const openEdit=b=>{
+    setDraft({
+      title:b.title||"",
+      date:b.date||new Date().toISOString().slice(0,10),
+      items:[...(b.items||[])],
+      notes:b.notes||"",
+      showPrices:b.showPrices!==false,
+      status:b.status||"pendiente",
+      payment:{...{mode:"contado",anticipoPct:50,anticipoAmt:0,cuotas:3,interesPct:0,roundTo:0},...(b.payment||{})}
+    });
+    setEditingBudgetId(b.id);
+    setShowForm(true);
+  };
 
   const addItem=()=>{
     if(!newItem.description.trim()) return;
@@ -890,32 +1142,48 @@ function BudgetPanel({patient,onChange,currentProf}){
     <script>window.onload=()=>{setTimeout(()=>window.print(),400);}</script>
     </body></html>`;
 
-    const blob=new Blob([html],{type:"text/html;charset=utf-8"});
-    const url=URL.createObjectURL(blob);
-    const win=window.open(url,"_blank");
-    if(!win){
+    const win=window.open("","_blank","width=900,height=700");
+    if(win){
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+      setTimeout(()=>win.print(),800);
+    } else {
+      const blob=new Blob([html],{type:"text/html;charset=utf-8"});
+      const url=URL.createObjectURL(blob);
       const a=document.createElement("a");
-      a.href=url;a.download=`presupuesto-${(patient.lastName||"paciente").toLowerCase()}.html`;
-      a.click();
+      a.href=url;
+      a.download=`presupuesto-${(patient.lastName||"paciente").toLowerCase()}.html`;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
     }
-    setTimeout(()=>URL.revokeObjectURL(url),3000);
   };
 
   const save=async()=>{
     if(!draft.title.trim()||draft.items.length===0) return;
-    const b={...draft,id:Date.now().toString(),createdAt:new Date().toISOString()};
-    const newBudgets=[b,...budgets];
+    let newBudgets;
+    if(editingBudgetId){
+      newBudgets=budgets.map(b=>b.id===editingBudgetId?{...b,...draft}:b);
+    } else {
+      const b={...draft,id:Date.now().toString(),createdAt:new Date().toISOString()};
+      newBudgets=[b,...budgets];
+    }
     const updated={...patient,budgets:newBudgets,updatedAt:new Date().toISOString()};
     onChange(updated);
     await saveNow(updated);
     setDraft(emptyDraft());
+    setEditingBudgetId(null);
     setShowForm(false);
   };
-  const delBudget=async id=>{
-    const updated={...patient,budgets:budgets.filter(b=>b.id!==id),updatedAt:new Date().toISOString()};
+  const [confirmBudget,setConfirmBudget]=useState(null);
+  const delBudget=id=>setConfirmBudget({msg:"¿Eliminar este presupuesto? También se eliminarán los cobros pendientes asociados.",onOk:async()=>{
+    setConfirmBudget(null);
+    // Eliminar cuotas pendientes asociadas a este presupuesto
+    const newPayments=(patient.payments||[]).filter(p=>!(p.budgetId===id&&p.tipo==="pendiente"&&!p.pagado));
+    const updated={...patient,budgets:budgets.filter(b=>b.id!==id),payments:newPayments,updatedAt:new Date().toISOString()};
     onChange(updated);
     await saveNow(updated);
-  };
+  }});
   const updateStatus=async(id,status)=>{
     const b=budgets.find(b=>b.id===id);
     let newPayments=[...(patient.payments||[])];
@@ -961,6 +1229,7 @@ function BudgetPanel({patient,onChange,currentProf}){
 
   return(
     <div>
+      {confirmBudget&&<ConfirmModal msg={confirmBudget.msg} onOk={confirmBudget.onOk} onCancel={()=>setConfirmBudget(null)}/>}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1e293b"}}>💰 Presupuestos y Planes</h3>
         {!showForm&&<button onClick={()=>{setDraft(emptyDraft());setShowForm(true);}} style={btnPrimary}>+ Nuevo presupuesto</button>}
@@ -968,7 +1237,10 @@ function BudgetPanel({patient,onChange,currentProf}){
 
       {showForm&&(
         <div style={{backgroundColor:"#f8fafc",borderRadius:12,padding:16,marginBottom:20,border:"1px solid #e2e8f0"}}>
-          <div style={{...gs,marginBottom:12}}>
+          {editingBudgetId&&<div style={{fontSize:11,fontWeight:700,color:"#d97706",marginBottom:12,padding:"6px 10px",backgroundColor:"#fef9c3",borderRadius:8,border:"1px solid #fde68a"}}>
+          ✏️ Editando presupuesto — los cambios reemplazarán el presupuesto original
+        </div>}
+        <div style={{...gs,marginBottom:12}}>
             <Field label="Título del plan" value={draft.title} onChange={v=>setDraft(d=>({...d,title:v}))} placeholder="Ej: Plan de tratamiento completo"/>
             <Field label="Fecha" value={draft.date} onChange={v=>setDraft(d=>({...d,date:v}))} type="date"/>
             <div>
@@ -1034,7 +1306,7 @@ function BudgetPanel({patient,onChange,currentProf}){
               style={{...is,resize:"vertical",fontFamily:"inherit"}}/></div>
 
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button onClick={()=>{setShowForm(false);setDraft(emptyDraft());}} style={btnSecondary}>Cancelar</button>
+            <button onClick={()=>{setShowForm(false);setDraft(emptyDraft());setEditingBudgetId(null);}} style={btnSecondary}>Cancelar</button>
             {draft.title&&draft.items.length>0&&draft.showPrices&&(
               <button onClick={()=>{
                 const tot=draft.items.reduce((s,i)=>s+((parseFloat(i.price)||0)*(parseInt(i.quantity)||1)),0);
@@ -1045,8 +1317,8 @@ function BudgetPanel({patient,onChange,currentProf}){
                 <span style={{fontSize:16}}>📄</span> Vista previa PDF
               </button>
             )}
-            <button onClick={save} style={{...btnPrimary,flex:1}} disabled={!draft.title||draft.items.length===0}>
-              💾 Guardar presupuesto
+            <button onClick={save} style={{...btnPrimary,flex:1,background:editingBudgetId?"linear-gradient(135deg,#d97706,#b45309)":undefined}} disabled={!draft.title||draft.items.length===0}>
+              {editingBudgetId?"✏️ Actualizar presupuesto":"💾 Guardar presupuesto"}
             </button>
           </div>
         </div>
@@ -1085,6 +1357,12 @@ function BudgetPanel({patient,onChange,currentProf}){
                         color:"#166534",fontWeight:700,fontSize:11,cursor:"pointer"}}>
                       📄 PDF
                     </button>}
+                    <button onClick={()=>openEdit(b)}
+                      title="Editar presupuesto"
+                      style={{padding:"4px 8px",borderRadius:6,border:"1px solid #f59e0b",backgroundColor:"#fffbeb",
+                        color:"#d97706",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                      ✏️
+                    </button>
                     <button onClick={()=>delBudget(b.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:16}}>🗑</button>
                   </div>
                 </div>
@@ -1164,11 +1442,23 @@ function PaymentsPanel({patient,onChange}){
   // Cobrar cuota pendiente
   const cobrarCuota=async(cuota)=>{
     const updated={...patient,
-      payments:allPayments.map(p=>p.id===cuota.id?{...p,pagado:true,date:new Date().toISOString().slice(0,10),method:"efectivo"}:p),
+      payments:allPayments.map(p=>p.id===cuota.id?{...p,pagado:true,date:new Date().toISOString().slice(0,10),method:p.method||"efectivo"}:p),
       updatedAt:new Date().toISOString()};
     onChange(updated);
     await saveNow(updated);
   };
+
+  const descobrarCuota=id=>setConfirmPago({
+    msg:"¿Deshacer este cobro? La cuota volverá a estar pendiente.",
+    onOk:async()=>{
+      setConfirmPago(null);
+      const updated={...patient,
+        payments:allPayments.map(p=>p.id===id?{...p,pagado:false,date:"",method:""}:p),
+        updatedAt:new Date().toISOString()};
+      onChange(updated);
+      await saveNow(updated);
+    }
+  });
 
   const editarMetodoCuota=async(cuotaId,method)=>{
     const updated={...patient,
@@ -1188,11 +1478,13 @@ function PaymentsPanel({patient,onChange}){
     setShowForm(false);
   };
 
-  const delPago=async id=>{
+  const [confirmPago,setConfirmPago]=useState(null);
+  const delPago=id=>setConfirmPago({msg:"¿Eliminar este pago del historial?",onOk:async()=>{
+    setConfirmPago(null);
     const updated={...patient,payments:allPayments.filter(p=>p.id!==id),updatedAt:new Date().toISOString()};
     onChange(updated);
     await saveNow(updated);
-  };
+  }});
 
   const today=new Date().toISOString().slice(0,10);
   const isVencida=p=>p.vencimiento&&p.vencimiento<today;
@@ -1205,6 +1497,7 @@ function PaymentsPanel({patient,onChange}){
         {!showForm&&<button onClick={()=>{setPago(emptyPago());setShowForm(true);}} style={btnPrimary}>+ Pago manual</button>}
       </div>
 
+      {confirmPago&&<ConfirmModal msg={confirmPago.msg} onOk={confirmPago.onOk} onCancel={()=>setConfirmPago(null)}/>}
       {/* Resumen financiero */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
         {[
@@ -1342,8 +1635,17 @@ function PaymentsPanel({patient,onChange}){
                       {p.label&&<span style={{marginLeft:8}}>· {p.label}</span>}
                     </div>
                   </div>
-                  {p.tipo!=="pendiente"&&<button onClick={()=>delPago(p.id)} title="Eliminar"
-                    style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:16,flexShrink:0}}>🗑</button>}
+                  <div style={{display:"flex",gap:4,flexShrink:0}}>
+                    {p.tipo==="pendiente"&&p.pagado&&(
+                      <button onClick={()=>descobrarCuota(p.id)} title="Deshacer cobro"
+                        style={{padding:"3px 7px",borderRadius:6,border:"1px solid #f59e0b",
+                          backgroundColor:"#fffbeb",color:"#d97706",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                        ↩
+                      </button>
+                    )}
+                    {p.tipo!=="pendiente"&&<button onClick={()=>delPago(p.id)} title="Eliminar"
+                      style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:16}}>🗑</button>}
+                  </div>
                 </div>
               );
             })}
@@ -1351,8 +1653,8 @@ function PaymentsPanel({patient,onChange}){
           <div style={{marginTop:10,padding:"10px 14px",backgroundColor:"#f8fafc",borderRadius:10,
             border:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:12,color:"#64748b"}}>
-              {pagosReales.filter(p=>p.method==="efectivo").length+cuotasPagadas.filter(p=>p.method==="efectivo").length} efectivo ·{" "}
-              {pagosReales.filter(p=>p.method==="transferencia").length+cuotasPagadas.filter(p=>p.method==="transferencia").length} transferencia
+              💵 {pagosReales.filter(p=>p.method==="efectivo").length+cuotasPagadas.filter(p=>p.method==="efectivo").length} efectivo ·{" "}
+              🏦 {pagosReales.filter(p=>p.method==="transferencia").length+cuotasPagadas.filter(p=>p.method==="transferencia").length} transferencia
             </div>
             <div style={{fontWeight:800,fontSize:14,color:deudaTotal>0?"#ef4444":"#22c55e"}}>
               {deudaTotal>0?`Debe: $${fmtARS(deudaTotal)}`:"✓ Sin deuda"}
@@ -1372,54 +1674,240 @@ function PaymentsPanel({patient,onChange}){
   );
 }
 
-// ─── APPOINTMENTS / CONSULTORIO.ME ────────────────────────────────────────────
-function AppointmentsPanel({patient}){
-  const fullName=`${patient.firstName||""} ${patient.lastName||""}`.trim();
-  const searchName=encodeURIComponent(fullName);
-  const consultorioUrl=`https://www.consultorio.me`;
+// ─── AGENDA / CALENDAR PANEL ─────────────────────────────────────────────────
+function AgendaPanel({patient,onChange,currentProf,allPatients,onSelectPatient}){
+  const today=new Date().toISOString().slice(0,10);
+  const [viewDate,setViewDate]=useState(today.slice(0,7)); // "YYYY-MM"
+  const [showForm,setShowForm]=useState(false);
+  const [editingApptId,setEditingApptId]=useState(null);
+  const [form,setForm]=useState({date:today,time:"09:00",duration:30,notes:"",patientId:patient?.id||""});
+  const [appointments,setAppointments]=useState([]);
+  const [loadingAppts,setLoadingAppts]=useState(true);
+
+  // Cargar turnos del profesional desde storage
+  useEffect(()=>{
+    (async()=>{
+      setLoadingAppts(true);
+      try{
+        const r=await sGet(`agenda:${currentProf.id}`);
+        if(r?.value) setAppointments(JSON.parse(r.value));
+        else setAppointments([]);
+      }catch{setAppointments([]);}
+      finally{setLoadingAppts(false);}
+    })();
+  },[currentProf.id]);
+
+  const saveAppts=async(list)=>{
+    setAppointments(list);
+    await sSet(`agenda:${currentProf.id}`,list);
+  };
+
+  const addAppt=async()=>{
+    if(!form.date||!form.patientId) return;
+    let updated;
+    if(editingApptId){
+      // Editar turno existente
+      updated=appointments.map(a=>a.id===editingApptId
+        ?{...a,patientId:form.patientId,date:form.date,time:form.time,duration:parseInt(form.duration)||30,notes:form.notes}
+        :a
+      ).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+    } else {
+      const newAppt={id:Date.now().toString(),patientId:form.patientId,date:form.date,
+        time:form.time,duration:parseInt(form.duration)||30,notes:form.notes,
+        createdAt:new Date().toISOString()};
+      updated=[...appointments,newAppt].sort((a,b)=>
+        (a.date+a.time).localeCompare(b.date+b.time));
+    }
+    await saveAppts(updated);
+    setShowForm(false);
+    setEditingApptId(null);
+    setForm({date:today,time:"09:00",duration:30,notes:"",patientId:patient?.id||""});
+  };
+
+  const openEditAppt=a=>{
+    setForm({date:a.date,time:a.time,duration:a.duration||30,notes:a.notes||"",patientId:a.patientId});
+    setEditingApptId(a.id);
+    setShowForm(true);
+  };
+
+  const delAppt=async id=>{
+    await saveAppts(appointments.filter(a=>a.id!==id));
+  };
+
+  const toggleAttendance=async(id,status)=>{
+    const updated=appointments.map(a=>a.id===id
+      ?{...a,attendance:a.attendance===status?null:status}
+      :a);
+    await saveAppts(updated);
+  };
+
+  // Calendario
+  const [year,month]=viewDate.split("-").map(Number);
+  const firstDay=new Date(year,month-1,1).getDay();
+  const daysInMonth=new Date(year,month,0).getDate();
+  const prevMonth=()=>{const d=new Date(year,month-2,1);setViewDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);};
+  const nextMonth=()=>{const d=new Date(year,month,1);setViewDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);};
+  const monthNames=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const dayNames=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+
+  const getPatientName=id=>{
+    const p=(allPatients||[]).find(x=>x.id===id);
+    return p?`${p.lastName||""}, ${p.firstName||""}`.trim()||"Sin nombre":"Paciente";
+  };
+
+  const apptsByDay={};
+  appointments.forEach(a=>{
+    if(!apptsByDay[a.date]) apptsByDay[a.date]=[];
+    apptsByDay[a.date].push(a);
+  });
+
+  const [selectedDay,setSelectedDay]=useState(today);
+  const dayAppts=(apptsByDay[selectedDay]||[]).sort((a,b)=>a.time.localeCompare(b.time));
+
+  // Fuente de pacientes para el selector
+  const patientPool=allPatients||[];
 
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1e293b"}}>📅 Turnos</h3>
+        <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1e293b"}}>📅 Agenda</h3>
+        <button onClick={()=>{setForm({date:selectedDay,time:"09:00",duration:30,notes:"",patientId:patient?.id||""});setShowForm(true);}}
+          style={btnPrimary}>+ Nuevo turno</button>
       </div>
 
-      <div style={{backgroundColor:"#f0f9ff",borderRadius:14,padding:24,border:"1px solid #bae6fd",textAlign:"center",marginBottom:16}}>
-        <div style={{fontSize:40,marginBottom:10}}>🔗</div>
-        <div style={{fontWeight:800,fontSize:16,color:"#0369a1",marginBottom:6}}>Integrado con Consultorio.me</div>
-        <div style={{fontSize:13,color:"#0284c7",marginBottom:18,lineHeight:1.6}}>
-          Los turnos se gestionan en tu cuenta de Consultorio.me.<br/>
-          Desde acá podés acceder directamente a la agenda del paciente.
+      {/* Formulario nuevo turno */}
+      {showForm&&(
+        <div style={{backgroundColor:"#f8fafc",borderRadius:12,padding:16,marginBottom:16,border:"1px solid #e2e8f0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:editingApptId?"#d97706":"#374151",marginBottom:12,textTransform:"uppercase",letterSpacing:0.4}}>
+            {editingApptId?"✏️ Editando turno":"Nuevo turno"}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><label style={ls}>Fecha</label>
+              <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={is}/></div>
+            <div><label style={ls}>Hora</label>
+              <input type="time" value={form.time} onChange={e=>setForm(f=>({...f,time:e.target.value}))} style={is}/></div>
+            <div><label style={ls}>Duración (min)</label>
+              <select value={form.duration} onChange={e=>setForm(f=>({...f,duration:e.target.value}))} style={{...is,padding:"9px 12px"}}>
+                {[15,20,30,45,60,90,120].map(d=><option key={d} value={d}>{d} min</option>)}
+              </select></div>
+            <div><label style={ls}>Paciente</label>
+              <select value={form.patientId} onChange={e=>setForm(f=>({...f,patientId:e.target.value}))}
+                style={{...is,padding:"9px 12px",borderColor:!form.patientId?"#fca5a5":undefined}}>
+                <option value="">— Seleccionar paciente —</option>
+                {patientPool.map(p=><option key={p.id} value={p.id}>{(p.lastName||"")}, {(p.firstName||"")} {p.dni?`· DNI ${p.dni}`:""}</option>)}
+              </select></div>
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={ls}>Notas del turno</label>
+            <input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}
+              placeholder="Ej: Control, extracción, urgencia..." style={is}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{setShowForm(false);setEditingApptId(null);setForm({date:today,time:"09:00",duration:30,notes:"",patientId:patient?.id||""});}} style={btnSecondary}>Cancelar</button>
+            <button onClick={addAppt} disabled={!form.date||!form.patientId}
+              style={{...btnPrimary,flex:1,opacity:!form.date||!form.patientId?0.6:1,
+                background:editingApptId?"linear-gradient(135deg,#d97706,#b45309)":undefined}}>
+              {editingApptId?"✏️ Actualizar turno":"💾 Guardar turno"}
+            </button>
+          </div>
         </div>
+      )}
 
-        <div style={{display:"flex",flexDirection:"column",gap:10,maxWidth:320,margin:"0 auto"}}>
-          <a href={consultorioUrl} target="_blank" rel="noopener noreferrer"
-            style={{...btnPrimary,display:"block",textDecoration:"none",textAlign:"center",padding:"12px 20px",fontSize:14}}>
-            🗓 Abrir Consultorio.me
-          </a>
-          <a href={`${consultorioUrl}/agenda`} target="_blank" rel="noopener noreferrer"
-            style={{...btnSecondary,display:"block",textDecoration:"none",textAlign:"center",padding:"12px 20px",fontSize:14}}>
-            📋 Ver agenda completa
-          </a>
+      {/* Calendario */}
+      <div style={{backgroundColor:"#fff",borderRadius:12,border:"1px solid #e2e8f0",overflow:"hidden",marginBottom:12}}>
+        {/* Header mes */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",
+          backgroundColor:"#1e293b",color:"#fff"}}>
+          <button onClick={prevMonth} style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:18,padding:"0 4px"}}>‹</button>
+          <span style={{fontWeight:700,fontSize:14}}>{monthNames[month-1]} {year}</span>
+          <button onClick={nextMonth} style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:18,padding:"0 4px"}}>›</button>
+        </div>
+        {/* Días de semana */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",backgroundColor:"#f1f5f9"}}>
+          {dayNames.map(d=><div key={d} style={{padding:"6px 0",textAlign:"center",fontSize:10,fontWeight:700,color:"#64748b"}}>{d}</div>)}
+        </div>
+        {/* Días del mes */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
+          {Array.from({length:firstDay}).map((_,i)=><div key={`e${i}`}/>)}
+          {Array.from({length:daysInMonth}).map((_,i)=>{
+            const day=i+1;
+            const dateStr=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const hasAppts=apptsByDay[dateStr]?.length>0;
+            const isToday=dateStr===today;
+            const isSelected=dateStr===selectedDay;
+            return(
+              <div key={day} onClick={()=>setSelectedDay(dateStr)}
+                style={{padding:"6px 0",textAlign:"center",cursor:"pointer",position:"relative",
+                  backgroundColor:isSelected?"#2563eb":isToday?"#eff6ff":"transparent",
+                  borderRadius:isSelected||isToday?"50%":"0",margin:"1px auto",width:32,height:32,
+                  display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}}>
+                <span style={{fontSize:12,fontWeight:isToday||isSelected?700:400,
+                  color:isSelected?"#fff":isToday?"#2563eb":"#1e293b"}}>{day}</span>
+                {hasAppts&&<div style={{width:4,height:4,borderRadius:"50%",
+                  backgroundColor:isSelected?"#fff":"#2563eb",marginTop:1}}/>}
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      <div style={{backgroundColor:"#fff",borderRadius:12,padding:16,border:"1px solid #e2e8f0"}}>
-        <div style={{fontWeight:700,fontSize:13,color:"#374151",marginBottom:10}}>Datos del paciente para Consultorio.me</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[["Nombre",fullName||"—"],["DNI",patient.dni||"—"],["Teléfono",patient.phone||"—"],["Email",patient.email||"—"],["Obra Social",patient.obraSocial||"—"],["Nro. Afiliado",patient.nroAfiliado||"—"]].map(([k,v])=>(
-            <div key={k} style={{padding:"8px 12px",backgroundColor:"#f8fafc",borderRadius:8}}>
-              <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",marginBottom:2}}>{k}</div>
-              <div style={{fontSize:13,fontWeight:600,color:"#1e293b"}}>{v}</div>
+      {/* Turnos del día seleccionado */}
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:0.4}}>
+          {selectedDay===today?"Hoy":"Turnos del"} {selectedDay===today?"":selectedDay}
+          {dayAppts.length>0&&<span style={{marginLeft:6,backgroundColor:"#eff6ff",color:"#2563eb",
+            padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700,textTransform:"none"}}>{dayAppts.length} turno{dayAppts.length>1?"s":""}</span>}
+        </div>
+        {loadingAppts&&<div style={{textAlign:"center",color:"#94a3b8",padding:16}}>Cargando...</div>}
+        {!loadingAppts&&dayAppts.length===0&&(
+          <div style={{padding:20,textAlign:"center",color:"#94a3b8",backgroundColor:"#f8fafc",
+            borderRadius:10,border:"1px dashed #e2e8f0",fontSize:13}}>
+            Sin turnos para este día
+          </div>
+        )}
+        {dayAppts.map(a=>(
+          <div key={a.id} style={{backgroundColor:"#fff",borderRadius:10,padding:"12px 14px",
+            marginBottom:8,border:"1px solid #e2e8f0",borderLeft:"4px solid #2563eb",
+            display:"flex",alignItems:"center",gap:10}}>
+            <div style={{textAlign:"center",flexShrink:0,backgroundColor:"#eff6ff",
+              borderRadius:8,padding:"6px 10px",minWidth:48}}>
+              <div style={{fontSize:14,fontWeight:800,color:"#2563eb"}}>{a.time}</div>
+              <div style={{fontSize:9,color:"#94a3b8"}}>{a.duration}min</div>
             </div>
-          ))}
-        </div>
-        <div style={{marginTop:12,padding:"10px 12px",backgroundColor:"#fef9c3",borderRadius:8,fontSize:12,color:"#854d0e"}}>
-          💡 <b>Tip:</b> Para una integración completa con la API de Consultorio.me y sincronización automática de turnos, contactanos para configurar tu cuenta.
-        </div>
+            <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>onSelectPatient&&onSelectPatient(a.patientId)}>
+              <div style={{fontWeight:700,fontSize:13,color:"#1e293b",overflow:"hidden",
+                textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{getPatientName(a.patientId)}</div>
+              {a.notes&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}>{a.notes}</div>}
+            </div>
+            {(()=>{const p=(allPatients||[]).find(x=>x.id===a.patientId);return p?.phone?(
+              <button onClick={()=>window.open(buildWAReminderUrl(p.phone,p.firstName,a.date,a.time),"_blank")}
+                title="Recordatorio WhatsApp"
+                style={{padding:"5px 8px",borderRadius:7,border:"1px solid #25d366",
+                  backgroundColor:"#f0fdf4",color:"#16a34a",fontWeight:700,
+                  fontSize:11,cursor:"pointer",flexShrink:0}}>
+                📱 WA
+              </button>
+            ):null;})()}
+            <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
+              <button onClick={()=>openEditAppt(a)}
+                title="Editar turno"
+                style={{padding:"4px 7px",borderRadius:6,border:"1px solid #f59e0b",
+                  backgroundColor:"#fffbeb",color:"#d97706",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                ✏️
+              </button>
+              <button onClick={()=>delAppt(a.id)} style={{background:"none",border:"none",
+                cursor:"pointer",color:"#94a3b8",fontSize:16,flexShrink:0}}>🗑</button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
+}
+
+// Alias para que la tab "turnos" siga funcionando
+function AppointmentsPanel({patient,onChange,currentProf,allPatients,onSelectPatient}){
+  return <AgendaPanel patient={patient} onChange={onChange} currentProf={currentProf} allPatients={allPatients} onSelectPatient={onSelectPatient}/>;
 }
 
 // ─── PDF EXPORT ───────────────────────────────────────────────────────────────
@@ -1515,16 +2003,22 @@ function exportPDF(patient){
   </div>
   </body></html>`;
 
-  const blob=new Blob([html],{type:"text/html;charset=utf-8"});
-  const url=URL.createObjectURL(blob);
-  const win=window.open(url,"_blank");
+  // Abrir en nueva ventana con document.write (más compatible)
+  const win=window.open("","_blank","width=900,height=700");
   if(win){
-    win.onload=()=>{setTimeout(()=>{win.print();URL.revokeObjectURL(url);},400);};
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    setTimeout(()=>win.print(),800);
   } else {
-    // Fallback: download directo
+    // Popup bloqueado: descargar como archivo HTML
+    const blob=new Blob([html],{type:"text/html;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
-    a.href=url;a.download=`ficha-${(patient.lastName||"paciente").toLowerCase()}.html`;
-    a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    a.href=url;
+    a.download=`ficha-${(patient.lastName||"paciente").toLowerCase()}.html`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
   }
 }
 
@@ -1659,10 +2153,29 @@ function LoginScreen({onLogin}){
       const names={};
       const genders={};
       for(const p of PROFESSIONALS){
-        const rn=await sGet(`prof:name:${p.id}`);
-        if(rn?.value) try{names[p.id]=JSON.parse(rn.value);}catch{}
-        const rg=await sGet(`prof:gender:${p.id}`);
-        if(rg?.value) try{genders[p.id]=JSON.parse(rg.value);}catch{}
+        try{
+          const rn=await sGet(`prof:name:${p.id}`);
+          if(rn?.value){
+            const v=JSON.parse(rn.value);
+            if(v&&typeof v==="string") names[p.id]=v;
+          }
+        }catch{}
+        try{
+          const rg=await sGet(`prof:gender:${p.id}`);
+          if(rg?.value){
+            const v=JSON.parse(rg.value);
+            if(v&&typeof v==="string") genders[p.id]=v;
+          }
+        }catch{}
+        // También intentar cargar desde el perfil completo como fallback
+        try{
+          const rp=await sGet(`prof:profile:${p.id}`);
+          if(rp?.value){
+            const d=JSON.parse(rp.value);
+            if(d?.name&&!names[p.id]) names[p.id]=d.name;
+            if(d?.gender&&!genders[p.id]) genders[p.id]=d.gender;
+          }
+        }catch{}
       }
       setProfNames(names);
       setProfGenders(genders);
@@ -1811,30 +2324,31 @@ function ProfessionalProfile({currentProf,onClose,onUpdate}){
   const [pwdError,setPwdError]=useState("");
   const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState("");
+  const [loadingProfile,setLoadingProfile]=useState(true);
 
   const emoji=gender==="dra"?"👩‍⚕️":"👨‍⚕️";
 
   useEffect(()=>{
     (async()=>{
-      const r=await sGet(`prof:profile:${currentProf.id}`);
-      if(r?.value){
-        const d=JSON.parse(r.value);
-        setName(d.name||currentProf.name);
-        setGender(d.gender||currentProf.gender||"dr");
-        setSpecialty(d.specialty||"");
-        setMatricula(d.matricula||"");
-        setPhone(d.phone||"");
-        setWhatsapp(d.whatsapp||"");
-        setEmailRecovery(d.emailRecovery||"");
-      }
+      setLoadingProfile(true);
+      try{
+        const r=await sGet(`prof:profile:${currentProf.id}`);
+        if(r?.value){
+          const d=JSON.parse(r.value);
+          setName(d.name||currentProf.name);
+          setGender(d.gender||currentProf.gender||"dr");
+          setSpecialty(d.specialty||"");
+          setMatricula(d.matricula||"");
+          setPhone(d.phone||"");
+          setWhatsapp(d.whatsapp||"");
+          setEmailRecovery(d.emailRecovery||"");
+        }
+      }catch(e){console.error("Error cargando perfil",e);}
+      finally{setLoadingProfile(false);}
     })();
   },[currentProf.id]);
 
   const handleSave=async()=>{
-    if(!whatsapp.trim()){
-      alert("⚠ El número de WhatsApp es obligatorio.\nOtros profesionales lo necesitan para avisarte cuando atienden a tus pacientes.");
-      return;
-    }
     if(newPwd){
       if(newPwd!==confirmPwd){setPwdError("Las contraseñas no coinciden");return;}
       if(newPwd.length<4){setPwdError("Mínimo 4 caracteres");return;}
@@ -1862,7 +2376,10 @@ function ProfessionalProfile({currentProf,onClose,onUpdate}){
         onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
           <h3 style={{margin:0,fontSize:16,fontWeight:800,color:"#1e293b"}}>{emoji} Mi perfil profesional</h3>
-          <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#94a3b8"}}>✕</button>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {loadingProfile&&<span style={{fontSize:11,color:"#94a3b8"}}>Cargando...</span>}
+            <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#94a3b8"}}>✕</button>
+          </div>
         </div>
 
         <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",
@@ -1915,11 +2432,13 @@ function ProfessionalProfile({currentProf,onClose,onUpdate}){
               style={is} onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e2e8f0"}/>
           </div>
           <div>
-            <label style={{...ls,color:"#166534"}}>📱 WhatsApp <span style={{color:"#ef4444"}}>*</span></label>
+            <label style={{...ls,color:"#166534"}}>📱 WhatsApp {!whatsapp&&<span style={{color:"#ef4444",fontWeight:700}}>— requerido para recibir avisos</span>}</label>
             <input value={whatsapp} onChange={e=>setWhatsapp(e.target.value)} placeholder="5491100000000" type="tel"
-              style={{...is,borderColor:!whatsapp?"#fca5a5":undefined}}
+              style={{...is,borderColor:!whatsapp?"#fca5a5":"#e2e8f0"}}
               onFocus={e=>e.target.style.borderColor="#25d366"} onBlur={e=>e.target.style.borderColor=!whatsapp?"#fca5a5":"#e2e8f0"}/>
-            <div style={{fontSize:10,color:"#6b7280",marginTop:3}}>Código de país sin + (ej: 5491100000000)</div>
+            <div style={{fontSize:10,color:"#6b7280",marginTop:3}}>
+              Código de país sin + (ej: 5491100000000) · Necesario para que otros profesionales te avisen al atender tus pacientes
+            </div>
           </div>
         </div>
 
@@ -2043,6 +2562,848 @@ function WhatsAppModal({modal,currentProf,onConfirmed,onCancel}){
   );
 }
 
+
+// ─── CONFIRM MODAL ───────────────────────────────────────────────────────────
+function ConfirmModal({msg, onOk, onCancel}){
+  return(
+    <div style={{position:"fixed",inset:0,backgroundColor:"rgba(0,0,0,0.55)",zIndex:5000,
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{backgroundColor:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:380,
+        boxShadow:"0 20px 60px rgba(0,0,0,0.25)",textAlign:"center"}}>
+        <div style={{fontSize:36,marginBottom:12}}>⚠️</div>
+        <div style={{fontSize:15,color:"#1e293b",fontWeight:600,marginBottom:20,lineHeight:1.5}}>{msg}</div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onCancel}
+            style={{flex:1,padding:"11px",borderRadius:10,border:"2px solid #e2e8f0",
+              backgroundColor:"#fff",color:"#64748b",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+            Cancelar
+          </button>
+          <button onClick={onOk}
+            style={{flex:1,padding:"11px",borderRadius:10,border:"none",
+              backgroundColor:"#ef4444",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+            Eliminar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── DASHBOARD (pantalla de inicio) ─────────────────────────────────────────
+function Dashboard({currentProf,patients,allPatients,onSelectPatient,onCreatePendingPatient}){
+  const today=new Date().toISOString().slice(0,10);
+  const [appointments,setAppointments]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [viewDate,setViewDate]=useState(today.slice(0,7));
+  const [selectedDay,setSelectedDay]=useState(today);
+  const [showQuickForm,setShowQuickForm]=useState(false);
+  const [quickMode,setQuickMode]=useState("existing"); // "existing" | "new"
+  const [editingDashApptId,setEditingDashApptId]=useState(null);
+  const [quickForm,setQuickForm]=useState({time:"09:00",duration:30,notes:"",patientId:"",
+    newFirstName:"",newLastName:"",newPhone:""});
+
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      try{
+        const r=await sGet(`agenda:${currentProf.id}`);
+        if(r?.value) setAppointments(JSON.parse(r.value));
+        else setAppointments([]);
+      }catch{setAppointments([]);}
+      finally{setLoading(false);}
+    })();
+  },[currentProf.id]);
+
+  const saveAppts=async(list)=>{
+    setAppointments(list);
+    await sSet(`agenda:${currentProf.id}`,list);
+  };
+
+  const todayAppts=appointments
+    .filter(a=>a.date===today)
+    .sort((a,b)=>a.time.localeCompare(b.time));
+
+  const getPatientName=id=>{
+    const p=(allPatients||[]).find(x=>x.id===id);
+    if(p) return `${p.lastName||""}, ${p.firstName||""}`.trim()||"Sin nombre";
+    return "Paciente";
+  };
+  const getPatientData=id=>(allPatients||[]).find(x=>x.id===id);
+
+  // Semana actual: lunes a domingo
+  const getMonday=(d)=>{const dt=new Date(d+"T12:00:00");const day=dt.getDay();const diff=dt.getDate()-(day===0?6:day-1);return new Date(dt.setDate(diff)).toISOString().slice(0,10);};
+  const getSunday=(d)=>{const dt=new Date(d+"T12:00:00");const day=dt.getDay();const diff=dt.getDate()+(day===0?0:7-day);return new Date(dt.setDate(diff)).toISOString().slice(0,10);};
+  const weekStart=getMonday(today);
+  const weekEnd=getSunday(today);
+  const weekApptsAll=appointments
+    .filter(a=>a.date>=weekStart&&a.date<=weekEnd)
+    .sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+  const weekAppts=weekApptsAll.filter(a=>a.date>=today).slice(0,5);
+
+  const drTitle=currentProf.gender==="dra"?"Dra.":"Dr.";
+  const hour=new Date().getHours();
+  const greeting=hour<12?"Buenos días":hour<19?"Buenas tardes":"Buenas noches";
+
+  // ── Calendario ──
+  const [year,month]=viewDate.split("-").map(Number);
+  const firstDay=new Date(year,month-1,1).getDay();
+  const daysInMonth=new Date(year,month,0).getDate();
+  const prevMonth=()=>{const d=new Date(year,month-2,1);setViewDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);};
+  const nextMonth=()=>{const d=new Date(year,month,1);setViewDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);};
+  const monthNames=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const dayNames=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+
+  const apptsByDay={};
+  appointments.forEach(a=>{
+    if(!apptsByDay[a.date]) apptsByDay[a.date]=[];
+    apptsByDay[a.date].push(a);
+  });
+  const selectedDayAppts=(apptsByDay[selectedDay]||[]).sort((a,b)=>a.time.localeCompare(b.time));
+
+  const openQuickForm=()=>{
+    setQuickForm({time:"09:00",duration:30,notes:"",patientId:"",newFirstName:"",newLastName:"",newPhone:""});
+    setQuickMode("existing");
+    setEditingDashApptId(null);
+    setShowQuickForm(true);
+  };
+
+  const addQuickAppt=async()=>{
+    let patientId=quickForm.patientId;
+
+    if(quickMode==="new"){
+      if(!quickForm.newFirstName.trim()&&!quickForm.newLastName.trim()) return;
+      const pendingPatient=onCreatePendingPatient({
+        firstName:quickForm.newFirstName.trim(),
+        lastName:quickForm.newLastName.trim(),
+        phone:quickForm.newPhone.trim(),
+      });
+      patientId=pendingPatient.id;
+    }
+
+    if(!patientId) return;
+
+    let updated;
+    if(editingDashApptId){
+      updated=appointments.map(a=>a.id===editingDashApptId
+        ?{...a,patientId,date:selectedDay,time:quickForm.time,duration:parseInt(quickForm.duration)||30,notes:quickForm.notes}
+        :a
+      ).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+    } else {
+      const newAppt={id:Date.now().toString(),patientId,date:selectedDay,
+        time:quickForm.time,duration:parseInt(quickForm.duration)||30,notes:quickForm.notes,
+        createdAt:new Date().toISOString()};
+      updated=[...appointments,newAppt].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+    }
+    await saveAppts(updated);
+    setShowQuickForm(false);
+    setEditingDashApptId(null);
+  };
+
+  const delAppt=async id=>{
+    await saveAppts(appointments.filter(a=>a.id!==id));
+  };
+
+  const toggleAttendance=async(id,status)=>{
+    const updated=appointments.map(a=>a.id===id
+      ?{...a,attendance:a.attendance===status?null:status}
+      :a);
+    await saveAppts(updated);
+  };
+
+  const patientPool=allPatients||[];
+
+  return(
+    <div style={{padding:20,maxWidth:760,margin:"0 auto"}}>
+      {/* Header saludo */}
+      <div style={{marginBottom:20,padding:"20px 24px",
+        background:"linear-gradient(135deg,#1e293b 0%,#2563eb 100%)",
+        borderRadius:16,color:"#fff"}}>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginBottom:4}}>{greeting}</div>
+        <div style={{fontSize:22,fontWeight:800}}>{drTitle} {currentProf.name}</div>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginTop:4}}>
+          {new Date().toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+        </div>
+      </div>
+
+      {/* Stats rápidas */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+        {[
+          {label:"Pacientes",value:patients.length,icon:"👥",color:"#2563eb",bg:"#eff6ff"},
+          {label:"Turnos hoy",value:todayAppts.length,icon:"📅",color:"#059669",bg:"#f0fdf4"},
+          {label:"Esta semana",value:weekApptsAll.length,icon:"📆",color:"#d97706",bg:"#fffbeb"},
+        ].map(({label,value,icon,color,bg})=>(
+          <div key={label} style={{backgroundColor:bg,borderRadius:12,padding:"14px",border:`1px solid ${color}22`,textAlign:"center"}}>
+            <div style={{fontSize:22}}>{icon}</div>
+            <div style={{fontSize:24,fontWeight:800,color,lineHeight:1}}>{value}</div>
+            <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Calendario rápido */}
+      <div style={{backgroundColor:"#fff",borderRadius:12,border:"1px solid #e2e8f0",overflow:"hidden",marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",
+          backgroundColor:"#1e293b",color:"#fff"}}>
+          <button onClick={prevMonth} style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:18,padding:"0 4px"}}>‹</button>
+          <span style={{fontWeight:700,fontSize:14}}>{monthNames[month-1]} {year}</span>
+          <button onClick={nextMonth} style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:18,padding:"0 4px"}}>›</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",backgroundColor:"#f1f5f9"}}>
+          {dayNames.map(d=><div key={d} style={{padding:"6px 0",textAlign:"center",fontSize:10,fontWeight:700,color:"#64748b"}}>{d}</div>)}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"6px 0"}}>
+          {Array.from({length:firstDay}).map((_,i)=><div key={`e${i}`}/>)}
+          {Array.from({length:daysInMonth}).map((_,i)=>{
+            const day=i+1;
+            const dateStr=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const hasAppts=apptsByDay[dateStr]?.length>0;
+            const isToday=dateStr===today;
+            const isSelected=dateStr===selectedDay;
+            return(
+              <div key={day} onClick={()=>setSelectedDay(dateStr)}
+                style={{padding:"2px 0",textAlign:"center",cursor:"pointer",position:"relative",
+                  backgroundColor:isSelected?"#2563eb":isToday?"#eff6ff":"transparent",
+                  borderRadius:"50%",margin:"1px auto",width:32,height:32,
+                  display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}}>
+                <span style={{fontSize:12,fontWeight:isToday||isSelected?700:400,
+                  color:isSelected?"#fff":isToday?"#2563eb":"#1e293b"}}>{day}</span>
+                {hasAppts&&<div style={{width:4,height:4,borderRadius:"50%",
+                  backgroundColor:isSelected?"#fff":"#2563eb",marginTop:1}}/>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Turnos del día seleccionado + agendar rápido */}
+      <div style={{marginBottom:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#1e293b",display:"flex",alignItems:"center",gap:8}}>
+            📅 {selectedDay===today?"Turnos de hoy":`Turnos del ${selectedDay}`}
+            {selectedDayAppts.length>0&&<span style={{backgroundColor:"#2563eb",color:"#fff",
+              borderRadius:10,padding:"2px 8px",fontSize:11}}>{selectedDayAppts.length}</span>}
+          </div>
+          {!showQuickForm&&<button onClick={openQuickForm} style={{...btnPrimary,padding:"7px 14px",fontSize:12}}>+ Agendar</button>}
+        </div>
+
+        {/* Formulario rápido de turno */}
+        {showQuickForm&&(
+          <div style={{backgroundColor:"#f8fafc",borderRadius:12,padding:16,marginBottom:12,border:"1px solid #e2e8f0"}}>
+            <div style={{fontSize:12,fontWeight:700,color:editingDashApptId?"#d97706":"#374151",marginBottom:10}}>
+              {editingDashApptId?`✏️ Editando turno — ${selectedDay}`:`Nuevo turno — ${selectedDay}`}
+            </div>
+
+            {/* Selector modo */}
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <button onClick={()=>setQuickMode("existing")}
+                style={{flex:1,padding:"8px",borderRadius:8,border:`2px solid ${quickMode==="existing"?"#2563eb":"#e2e8f0"}`,
+                  backgroundColor:quickMode==="existing"?"#eff6ff":"#fff",color:quickMode==="existing"?"#2563eb":"#64748b",
+                  fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                👤 Paciente registrado
+              </button>
+              <button onClick={()=>setQuickMode("new")}
+                style={{flex:1,padding:"8px",borderRadius:8,border:`2px solid ${quickMode==="new"?"#7c3aed":"#e2e8f0"}`,
+                  backgroundColor:quickMode==="new"?"#f5f3ff":"#fff",color:quickMode==="new"?"#7c3aed":"#64748b",
+                  fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                ✨ Paciente nuevo
+              </button>
+            </div>
+
+            {quickMode==="existing"?(
+              <div style={{marginBottom:10}}>
+                <label style={ls}>Paciente</label>
+                <select value={quickForm.patientId} onChange={e=>setQuickForm(f=>({...f,patientId:e.target.value}))}
+                  style={{...is,padding:"9px 12px",borderColor:!quickForm.patientId?"#fca5a5":undefined}}>
+                  <option value="">— Seleccionar paciente —</option>
+                  {patientPool.map(p=><option key={p.id} value={p.id}>{(p.lastName||"")}, {(p.firstName||"")} {p.dni?`· DNI ${p.dni}`:""}</option>)}
+                </select>
+              </div>
+            ):(
+              <div style={{marginBottom:10,backgroundColor:"#f5f3ff",borderRadius:8,padding:12,border:"1px solid #ddd6fe"}}>
+                <div style={{fontSize:11,color:"#7c3aed",fontWeight:600,marginBottom:8}}>
+                  Se creará como paciente pendiente — completá la ficha el día de la consulta
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <input value={quickForm.newFirstName} onChange={e=>setQuickForm(f=>({...f,newFirstName:e.target.value}))}
+                    placeholder="Nombre" style={{...is,padding:"8px 10px"}}/>
+                  <input value={quickForm.newLastName} onChange={e=>setQuickForm(f=>({...f,newLastName:e.target.value}))}
+                    placeholder="Apellido" style={{...is,padding:"8px 10px"}}/>
+                </div>
+                <input value={quickForm.newPhone} onChange={e=>setQuickForm(f=>({...f,newPhone:e.target.value}))}
+                  placeholder="Teléfono" type="tel" style={{...is,padding:"8px 10px"}}/>
+              </div>
+            )}
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <div><label style={ls}>Hora</label>
+                <input type="time" value={quickForm.time} onChange={e=>setQuickForm(f=>({...f,time:e.target.value}))} style={is}/></div>
+              <div><label style={ls}>Duración (min)</label>
+                <select value={quickForm.duration} onChange={e=>setQuickForm(f=>({...f,duration:e.target.value}))} style={{...is,padding:"9px 12px"}}>
+                  {[15,20,30,45,60,90,120].map(d=><option key={d} value={d}>{d} min</option>)}
+                </select></div>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={ls}>Notas</label>
+              <input value={quickForm.notes} onChange={e=>setQuickForm(f=>({...f,notes:e.target.value}))}
+                placeholder="Ej: Primera consulta, control..." style={is}/>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{setShowQuickForm(false);setEditingDashApptId(null);}} style={btnSecondary}>Cancelar</button>
+              <button onClick={addQuickAppt}
+                disabled={quickMode==="existing"?!quickForm.patientId:(!quickForm.newFirstName.trim()&&!quickForm.newLastName.trim())}
+                style={{...btnPrimary,flex:1,background:editingDashApptId?"linear-gradient(135deg,#d97706,#b45309)":undefined}}>
+                {editingDashApptId?"✏️ Actualizar turno":"💾 Agendar turno"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {loading&&<div style={{textAlign:"center",color:"#94a3b8",padding:16,fontSize:13}}>Cargando agenda...</div>}
+        {!loading&&selectedDayAppts.length===0&&!showQuickForm&&(
+          <div style={{padding:"16px 20px",backgroundColor:"#f8fafc",borderRadius:10,
+            border:"1px dashed #e2e8f0",fontSize:13,color:"#94a3b8",textAlign:"center"}}>
+            No hay turnos agendados para este día
+          </div>
+        )}
+        {selectedDayAppts.map(a=>{
+          const pat=getPatientData(a.patientId);
+          const isPending=pat?.pending;
+          return(
+            <div key={a.id}
+              style={{backgroundColor:a.attendance==="attended"?"#f0fdf4":a.attendance==="absent"?"#fef2f2":"#fff",
+                borderRadius:10,padding:"12px 16px",marginBottom:8,
+                border:`1px solid ${a.attendance==="attended"?"#86efac":a.attendance==="absent"?"#fca5a5":"#e2e8f0"}`,
+                borderLeft:`4px solid ${a.attendance==="attended"?"#16a34a":a.attendance==="absent"?"#ef4444":isPending?"#7c3aed":"#2563eb"}`,
+                display:"flex",alignItems:"center",gap:12,transition:"all 0.2s"}}>
+              <div onClick={()=>pat&&onSelectPatient(a.patientId)}
+                style={{backgroundColor:isPending?"#f5f3ff":"#eff6ff",borderRadius:8,padding:"8px 10px",
+                  textAlign:"center",flexShrink:0,minWidth:52,cursor:pat?"pointer":"default"}}>
+                <div style={{fontSize:15,fontWeight:800,color:isPending?"#7c3aed":"#2563eb"}}>{a.time}</div>
+                <div style={{fontSize:9,color:"#94a3b8"}}>{a.duration}min</div>
+              </div>
+              <div style={{flex:1,minWidth:0,cursor:pat?"pointer":"default"}} onClick={()=>pat&&onSelectPatient(a.patientId)}>
+                <div style={{fontWeight:700,fontSize:13,color:"#1e293b",display:"flex",alignItems:"center",gap:6,
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {getPatientName(a.patientId)}
+                  {isPending&&<span style={{fontSize:9,backgroundColor:"#f5f3ff",color:"#7c3aed",
+                    padding:"2px 6px",borderRadius:6,fontWeight:700}}>NUEVO</span>}
+                </div>
+                {a.notes&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}>{a.notes}</div>}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
+                {/* Botones asistencia */}
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>toggleAttendance(a.id,"attended")}
+                    title="Asistió"
+                    style={{width:30,height:30,borderRadius:7,border:`2px solid ${a.attendance==="attended"?"#16a34a":"#e2e8f0"}`,
+                      backgroundColor:a.attendance==="attended"?"#16a34a":"#fff",
+                      color:a.attendance==="attended"?"#fff":"#94a3b8",
+                      fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    ✓
+                  </button>
+                  <button onClick={()=>toggleAttendance(a.id,"absent")}
+                    title="No asistió"
+                    style={{width:30,height:30,borderRadius:7,border:`2px solid ${a.attendance==="absent"?"#ef4444":"#e2e8f0"}`,
+                      backgroundColor:a.attendance==="absent"?"#ef4444":"#fff",
+                      color:a.attendance==="absent"?"#fff":"#94a3b8",
+                      fontWeight:800,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    ✕
+                  </button>
+                </div>
+                {pat?.phone&&(
+                  <button onClick={()=>window.open(buildWAReminderUrl(pat.phone,pat.firstName,a.date,a.time),"_blank")}
+                    title="Enviar recordatorio por WhatsApp"
+                    style={{padding:"3px 6px",borderRadius:7,border:"1px solid #25d366",
+                      backgroundColor:"#f0fdf4",color:"#16a34a",fontWeight:700,
+                      fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}>
+                    <span style={{fontSize:11}}>📱</span>WA
+                  </button>
+                )}
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>{
+                      setSelectedDay(a.date);
+                      setQuickForm({time:a.time,duration:a.duration||30,notes:a.notes||"",patientId:a.patientId,newFirstName:"",newLastName:"",newPhone:""});
+                      setQuickMode("existing");
+                      setEditingDashApptId(a.id);
+                      setShowQuickForm(true);
+                    }}
+                    title="Editar turno"
+                    style={{flex:1,padding:"3px 6px",borderRadius:6,border:"1px solid #f59e0b",
+                      backgroundColor:"#fffbeb",color:"#d97706",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                    ✏️
+                  </button>
+                  <button onClick={()=>delAppt(a.id)}
+                    style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:15}}>🗑</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Próximos turnos */}
+      {weekAppts.length>0&&(
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:"#1e293b",marginBottom:10}}>
+            📆 Próximos turnos
+          </div>
+          {weekAppts.map(a=>{
+            const pat=getPatientData(a.patientId);
+            const d=new Date(a.date+"T12:00:00");
+            const dayLabel=d.toLocaleDateString("es-AR",{weekday:"short",day:"numeric",month:"short"});
+            return(
+              <div key={a.id} onClick={()=>pat&&onSelectPatient(a.patientId)}
+                style={{backgroundColor:"#fff",borderRadius:10,padding:"10px 14px",marginBottom:6,
+                  border:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:10,
+                  cursor:pat?"pointer":"default"}}
+                onMouseEnter={e=>{if(pat)e.currentTarget.style.backgroundColor="#f8fafc";}}
+                onMouseLeave={e=>{e.currentTarget.style.backgroundColor="#fff";}}>
+                <div style={{fontSize:11,color:"#2563eb",fontWeight:700,flexShrink:0,minWidth:64,
+                  textAlign:"center",backgroundColor:"#eff6ff",padding:"4px 6px",borderRadius:6}}>
+                  {dayLabel}
+                </div>
+                <div style={{fontWeight:600,fontSize:12,color:"#374151",flexShrink:0}}>{a.time}</div>
+                <div style={{flex:1,fontSize:13,color:"#1e293b",fontWeight:600,
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {getPatientName(a.patientId)}
+                </div>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                  {pat?.phone&&(
+                    <button onClick={e=>{e.stopPropagation();window.open(buildWAReminderUrl(pat.phone,pat.firstName,a.date,a.time),"_blank");}}
+                      title="Enviar recordatorio por WhatsApp"
+                      style={{padding:"4px 7px",borderRadius:7,border:"1px solid #25d366",
+                        backgroundColor:"#f0fdf4",color:"#16a34a",fontWeight:700,
+                        fontSize:10,cursor:"pointer"}}>
+                      📱
+                    </button>
+                  )}
+                  {pat&&<div style={{color:"#94a3b8",fontSize:16}}>›</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ─── ESTADÍSTICAS (solo visible para el profesional) ─────────────────────────
+function StatsPanel({currentProf,patients}){
+  const today=new Date().toISOString().slice(0,10);
+  const monthStr=today.slice(0,7);
+
+  // ── Recolectar todos los pagos cobrados de todos los pacientes propios ──
+  const allCobros=[];
+  const cobrosConPaciente=[]; // para el detalle por paciente
+  (patients||[]).forEach(p=>{
+    (p.payments||[]).forEach(pay=>{
+      const isPaid = pay.tipo==="pendiente" ? pay.pagado : true;
+      if(!isPaid || !pay.amount) return;
+      const payDate=pay.date||new Date().toISOString().slice(0,10);
+      const entry={
+        date:payDate,
+        amount:parseFloat(pay.amount)||0,
+        method:pay.method==="transferencia"?"transferencia":"efectivo",
+        patientName:`${p.lastName||""}, ${p.firstName||""}`.trim()||"Sin nombre",
+        concept:pay.concept||pay.label||"",
+      };
+      allCobros.push(entry);
+      cobrosConPaciente.push(entry);
+    });
+  });
+
+  // Detalle hoy por paciente
+  const detHoy=cobrosConPaciente
+    .filter(c=>c.date===today)
+    .sort((a,b)=>a.patientName.localeCompare(b.patientName));
+
+  // Detalle mes por paciente (agrupado)
+  const detMesMap={};
+  cobrosConPaciente.filter(c=>c.date.slice(0,7)===monthStr).forEach(c=>{
+    if(!detMesMap[c.patientName]) detMesMap[c.patientName]={name:c.patientName,efectivo:0,transferencia:0,total:0,items:[]};
+    detMesMap[c.patientName][c.method]+=c.amount;
+    detMesMap[c.patientName].total+=c.amount;
+    detMesMap[c.patientName].items.push(c);
+  });
+  const detMes=Object.values(detMesMap).sort((a,b)=>b.total-a.total);
+
+  // ── Totales hoy / mes ──
+  let cobrosHoy={efectivo:0,transferencia:0};
+  let cobrosMes={efectivo:0,transferencia:0};
+  allCobros.forEach(c=>{
+    if(c.date===today) cobrosHoy[c.method]+=c.amount;
+    if(c.date.slice(0,7)===monthStr) cobrosMes[c.method]+=c.amount;
+  });
+  const totalHoy=cobrosHoy.efectivo+cobrosHoy.transferencia;
+  const totalMes=cobrosMes.efectivo+cobrosMes.transferencia;
+
+  // ── Totales históricos por método (para gráfico comparativo) ──
+  const totalHistEfectivo=allCobros.filter(c=>c.method==="efectivo").reduce((s,c)=>s+c.amount,0);
+  const totalHistTransferencia=allCobros.filter(c=>c.method==="transferencia").reduce((s,c)=>s+c.amount,0);
+  const totalHist=totalHistEfectivo+totalHistTransferencia;
+  const pctEfectivo=totalHist>0?Math.round(totalHistEfectivo/totalHist*100):0;
+  const pctTransferencia=100-pctEfectivo;
+
+  // ── Facturación de los últimos 12 meses ──
+  const months=[];
+  const now=new Date();
+  for(let i=11;i>=0;i--){
+    const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+    const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    const label=d.toLocaleDateString("es-AR",{month:"short"});
+    months.push({key,label,total:0,efectivo:0,transferencia:0});
+  }
+  allCobros.forEach(c=>{
+    const key=c.date.slice(0,7);
+    const m=months.find(x=>x.key===key);
+    if(m){ m.total+=c.amount; m[c.method]+=c.amount; }
+  });
+  const maxMonthly=Math.max(1,...months.map(m=>m.total));
+
+  const drTitle=currentProf.gender==="dra"?"Dra.":"Dr.";
+
+  return(
+    <div style={{padding:20,maxWidth:780,margin:"0 auto"}}>
+      {/* Header */}
+      <div style={{marginBottom:20,padding:"18px 24px",
+        background:"linear-gradient(135deg,#1e293b 0%,#7c3aed 100%)",
+        borderRadius:16,color:"#fff"}}>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginBottom:4}}>📊 Panel privado</div>
+        <div style={{fontSize:20,fontWeight:800}}>Estadísticas de {drTitle} {currentProf.name}</div>
+        <div style={{fontSize:11,color:"rgba(255,255,255,0.6)",marginTop:4}}>
+          Esta información solo la ves vos — no es visible para pacientes ni otros profesionales
+        </div>
+      </div>
+
+      {/* Totales hoy / mes */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
+        <div style={{backgroundColor:"#1e293b",borderRadius:12,padding:"14px 16px",color:"#fff"}}>
+          <div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",fontWeight:700,marginBottom:6}}>💰 Cobrado hoy</div>
+          <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>${fmtARS(totalHoy)}</div>
+          <div style={{display:"flex",gap:10,fontSize:11,color:"#94a3b8"}}>
+            <span>💵 ${fmtARS(cobrosHoy.efectivo)}</span>
+            <span>🏦 ${fmtARS(cobrosHoy.transferencia)}</span>
+          </div>
+        </div>
+        <div style={{backgroundColor:"#f8fafc",borderRadius:12,padding:"14px 16px",border:"1px solid #e2e8f0"}}>
+          <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",fontWeight:700,marginBottom:6}}>📊 Cobrado este mes</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#1e293b",marginBottom:6}}>${fmtARS(totalMes)}</div>
+          <div style={{display:"flex",gap:10,fontSize:11,color:"#64748b"}}>
+            <span>💵 ${fmtARS(cobrosMes.efectivo)}</span>
+            <span>🏦 ${fmtARS(cobrosMes.transferencia)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Detalle hoy por paciente */}
+      {detHoy.length>0?(
+        <div style={{backgroundColor:"#fff",borderRadius:14,border:"1px solid #e2e8f0",marginBottom:16,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",backgroundColor:"#1e293b",color:"#fff",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontWeight:700,fontSize:13}}>💰 Detalle de cobros de hoy</span>
+            <span style={{fontSize:12,color:"#94a3b8"}}>{detHoy.length} cobro{detHoy.length!==1?"s":""}</span>
+          </div>
+          {detHoy.map((c,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",
+              borderBottom:i<detHoy.length-1?"1px solid #f1f5f9":"none",
+              backgroundColor:i%2?"#f8fafc":"#fff"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#1e293b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.patientName}</div>
+                {c.concept&&<div style={{fontSize:11,color:"#64748b",marginTop:1}}>{c.concept}</div>}
+              </div>
+              <div style={{flexShrink:0,textAlign:"right"}}>
+                <div style={{fontWeight:800,fontSize:14,color:"#22c55e"}}>${fmtARS(c.amount)}</div>
+                <div style={{fontSize:10,marginTop:2}}>
+                  {c.method==="efectivo"
+                    ?<span style={{color:"#166534",backgroundColor:"#dcfce7",padding:"1px 6px",borderRadius:6,fontWeight:700}}>💵 Efectivo</span>
+                    :<span style={{color:"#1d4ed8",backgroundColor:"#dbeafe",padding:"1px 6px",borderRadius:6,fontWeight:700}}>🏦 Transferencia</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ):(
+        <div style={{padding:"14px 16px",backgroundColor:"#f8fafc",borderRadius:14,border:"1px solid #e2e8f0",marginBottom:16,
+          fontSize:13,color:"#94a3b8",textAlign:"center"}}>
+          Sin cobros registrados hoy
+        </div>
+      )}
+
+      {/* Detalle mes por paciente */}
+      {detMes.length>0?(
+        <div style={{backgroundColor:"#fff",borderRadius:14,border:"1px solid #e2e8f0",marginBottom:16,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",backgroundColor:"#f8fafc",borderBottom:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontWeight:700,fontSize:13,color:"#1e293b"}}>📊 Detalle de cobros del mes por paciente</span>
+            <span style={{fontSize:12,color:"#64748b"}}>{detMes.length} paciente{detMes.length!==1?"s":""}</span>
+          </div>
+          {detMes.map((d,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",
+              borderBottom:i<detMes.length-1?"1px solid #f1f5f9":"none",
+              backgroundColor:i%2?"#f8fafc":"#fff"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#1e293b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.name}</div>
+                <div style={{display:"flex",gap:8,marginTop:3,fontSize:11}}>
+                  {d.efectivo>0&&<span style={{color:"#166534",backgroundColor:"#dcfce7",padding:"1px 6px",borderRadius:6,fontWeight:700}}>💵 ${fmtARS(d.efectivo)}</span>}
+                  {d.transferencia>0&&<span style={{color:"#1d4ed8",backgroundColor:"#dbeafe",padding:"1px 6px",borderRadius:6,fontWeight:700}}>🏦 ${fmtARS(d.transferencia)}</span>}
+                </div>
+              </div>
+              <div style={{fontWeight:800,fontSize:15,color:"#1e293b",flexShrink:0}}>${fmtARS(d.total)}</div>
+            </div>
+          ))}
+        </div>
+      ):(
+        <div style={{padding:"14px 16px",backgroundColor:"#f8fafc",borderRadius:14,border:"1px solid #e2e8f0",marginBottom:16,
+          fontSize:13,color:"#94a3b8",textAlign:"center"}}>
+          Sin cobros registrados este mes
+        </div>
+      )}
+
+      {/* Gráfico comparativo: efectivo vs transferencia */}
+      <div style={{backgroundColor:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:20,marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#1e293b",marginBottom:14}}>💵 vs 🏦 — Comparativo histórico de ingresos</div>
+        {totalHist===0?(
+          <div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:13}}>Todavía no hay cobros registrados</div>
+        ):(
+          <>
+            {/* Barra horizontal dual */}
+            <div style={{display:"flex",height:36,borderRadius:10,overflow:"hidden",marginBottom:12}}>
+              <div style={{width:`${pctEfectivo}%`,backgroundColor:"#22c55e",
+                display:"flex",alignItems:"center",justifyContent:"center",
+                color:"#fff",fontSize:12,fontWeight:800,transition:"width 0.3s"}}>
+                {pctEfectivo>12&&`${pctEfectivo}%`}
+              </div>
+              <div style={{width:`${pctTransferencia}%`,backgroundColor:"#3b82f6",
+                display:"flex",alignItems:"center",justifyContent:"center",
+                color:"#fff",fontSize:12,fontWeight:800,transition:"width 0.3s"}}>
+                {pctTransferencia>12&&`${pctTransferencia}%`}
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",backgroundColor:"#f0fdf4",borderRadius:10,border:"1px solid #bbf7d0"}}>
+                <div style={{width:12,height:12,borderRadius:4,backgroundColor:"#22c55e",flexShrink:0}}/>
+                <div>
+                  <div style={{fontSize:10,color:"#166534",fontWeight:700,textTransform:"uppercase"}}>💵 Efectivo</div>
+                  <div style={{fontSize:15,fontWeight:800,color:"#166534"}}>${fmtARS(totalHistEfectivo)}</div>
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",backgroundColor:"#eff6ff",borderRadius:10,border:"1px solid #bfdbfe"}}>
+                <div style={{width:12,height:12,borderRadius:4,backgroundColor:"#3b82f6",flexShrink:0}}/>
+                <div>
+                  <div style={{fontSize:10,color:"#1d4ed8",fontWeight:700,textTransform:"uppercase"}}>🏦 Transferencia</div>
+                  <div style={{fontSize:15,fontWeight:800,color:"#1d4ed8"}}>${fmtARS(totalHistTransferencia)}</div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Gráfico de barras: facturación mensual (12 meses) */}
+      <div style={{backgroundColor:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:20,paddingBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#1e293b",marginBottom:4}}>📈 Facturación mensual — últimos 12 meses</div>
+        <div style={{fontSize:11,color:"#94a3b8",marginBottom:16}}>Comparativo de ingresos mes a mes</div>
+
+        {totalHist===0?(
+          <div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:13}}>Sin datos suficientes todavía</div>
+        ):(
+          <div style={{display:"flex",alignItems:"flex-end",gap:4,height:180,marginBottom:8,overflowX:"auto"}}>
+            {months.map(m=>{
+              const h=Math.max(2,Math.round((m.total/maxMonthly)*150));
+              const isCurrent=m.key===monthStr;
+              return(
+                <div key={m.key} style={{flex:1,minWidth:32,display:"flex",flexDirection:"column",
+                  alignItems:"center",justifyContent:"flex-end",height:"100%"}}>
+                  {m.total>0&&<div style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:3,whiteSpace:"nowrap"}}>
+                    ${m.total>=1000000?`${(m.total/1000000).toFixed(1)}M`:m.total>=1000?`${Math.round(m.total/1000)}k`:fmtARS(m.total)}
+                  </div>}
+                  <div style={{width:"100%",borderRadius:"6px 6px 0 0",height:h,
+                    background:isCurrent?"linear-gradient(180deg,#7c3aed,#2563eb)":"linear-gradient(180deg,#93c5fd,#60a5fa)",
+                    transition:"height 0.3s"}}/>
+                  <div style={{fontSize:10,color:isCurrent?"#2563eb":"#94a3b8",fontWeight:isCurrent?800:600,
+                    marginTop:6,textTransform:"capitalize"}}>{m.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Mes de mayor facturación */}
+        {totalHist>0&&(()=>{
+          const best=months.reduce((a,b)=>b.total>a.total?b:a,months[0]);
+          if(best.total===0) return null;
+          return(
+            <div style={{marginTop:12,padding:"10px 14px",backgroundColor:"#f5f3ff",borderRadius:10,
+              border:"1px solid #ddd6fe",fontSize:12,color:"#5b21b6",display:"flex",alignItems:"center",gap:8}}>
+              🏆 <strong style={{textTransform:"capitalize"}}>{best.label}</strong> fue el mes con mayor facturación: ${fmtARS(best.total)}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+
+// ─── PAGOS PENDIENTES PANEL ───────────────────────────────────────────────────
+function PendingPaymentsPanel({patients,allPatients,onSelectPatient}){
+  const today=new Date().toISOString().slice(0,10);
+
+  // Recolectar todas las cuotas pendientes de todos los pacientes
+  const pendingItems=[];
+  (patients||[]).forEach(pat=>{
+    (pat.payments||[]).forEach(pay=>{
+      if(pay.tipo!=="pendiente"||pay.pagado) return;
+      if(!pay.amount) return;
+      const venc=pay.vencimiento||"";
+      const isVenc=venc&&venc<today;
+      pendingItems.push({
+        patientId:pat.id,
+        patientName:`${pat.lastName||""}, ${pat.firstName||""}`.trim()||"Sin nombre",
+        patientPhone:pat.phone||"",
+        paymentId:pay.id,
+        label:pay.label||pay.concept||"Cuota",
+        amount:parseFloat(pay.amount)||0,
+        vencimiento:venc,
+        isVencida:isVenc,
+        budgetTitle:(pat.budgets||[]).find(b=>b.id===pay.budgetId)?.title||"",
+      });
+    });
+  });
+
+  // Ordenar: vencidas primero, luego por fecha
+  pendingItems.sort((a,b)=>{
+    if(a.isVencida&&!b.isVencida) return -1;
+    if(!a.isVencida&&b.isVencida) return 1;
+    return (a.vencimiento||"").localeCompare(b.vencimiento||"");
+  });
+
+  const totalPendiente=pendingItems.reduce((s,i)=>s+i.amount,0);
+  const vencidas=pendingItems.filter(i=>i.isVencida);
+  const porVencer=pendingItems.filter(i=>!i.isVencida);
+
+  const buildWAPaymentMsg=(item)=>{
+    const nombre=item.patientName.split(",")[1]?.trim()||item.patientName;
+    const fechaStr=item.vencimiento
+      ?new Date(item.vencimiento+"T12:00:00").toLocaleDateString("es-AR",{day:"numeric",month:"long"})
+      :"próxima";
+    const msg=
+`Hola ${nombre}! 😊 Soy Lean de Odontología Werbag 🦷
+Te recordamos que tenés un pago pendiente:
+📋 ${item.label}${item.budgetTitle?" — "+item.budgetTitle:""}
+💰 Monto: $${item.amount.toLocaleString("es-AR",{maximumFractionDigits:0})}
+📅 Vencimiento: ${fechaStr}
+Por favor coordiná el pago a la brevedad. ✅
+¡Muchas gracias! 😁`;
+    let phone=(item.patientPhone||"").replace(/\D/g,"")||"5492213181572";
+    if(phone&&!phone.startsWith("54")){
+      phone=phone.startsWith("0")?"54"+phone.slice(1):"54"+phone;
+    }
+    return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+  };
+
+  const Section=({title,items,color,bg,border})=>(
+    items.length===0?null:(
+      <div style={{marginBottom:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color}}>{title}</div>
+          <span style={{backgroundColor:bg,color,border:`1px solid ${border}`,
+            padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>
+            {items.length}
+          </span>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {items.map((item,idx)=>(
+            <div key={`${item.patientId}-${item.paymentId}`}
+              style={{backgroundColor:"#fff",borderRadius:10,padding:"12px 14px",
+                border:`1px solid ${border}`,borderLeft:`4px solid ${color}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>onSelectPatient(item.patientId)}>
+                  <div style={{fontWeight:700,fontSize:13,color:"#1e293b",
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {item.patientName}
+                  </div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <span>{item.label}</span>
+                    {item.budgetTitle&&<span style={{color:"#7c3aed"}}>📄 {item.budgetTitle}</span>}
+                    {item.vencimiento&&<span style={{color:item.isVencida?"#ef4444":"#64748b"}}>
+                      📅 {new Date(item.vencimiento+"T12:00:00").toLocaleDateString("es-AR",{day:"numeric",month:"short",year:"numeric"})}
+                    </span>}
+                  </div>
+                </div>
+                <div style={{fontWeight:800,fontSize:15,color,flexShrink:0}}>
+                  ${item.amount.toLocaleString("es-AR",{maximumFractionDigits:0})}
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  {item.patientPhone&&(
+                    <button onClick={()=>window.open(buildWAPaymentMsg(item),"_blank")}
+                      title="Recordatorio de pago por WhatsApp"
+                      style={{padding:"6px 10px",borderRadius:7,border:"1px solid #25d366",
+                        backgroundColor:"#f0fdf4",color:"#16a34a",fontWeight:700,
+                        fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:13}}>📱</span>Recordar
+                    </button>
+                  )}
+                  <button onClick={()=>onSelectPatient(item.patientId)}
+                    title="Ver ficha del paciente"
+                    style={{padding:"6px 10px",borderRadius:7,border:"1px solid #e2e8f0",
+                      backgroundColor:"#f8fafc",color:"#64748b",fontWeight:700,
+                      fontSize:11,cursor:"pointer"}}>
+                    Ver ficha
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  );
+
+  return(
+    <div style={{padding:20,maxWidth:760,margin:"0 auto"}}>
+      {/* Header */}
+      <div style={{marginBottom:20,padding:"18px 24px",
+        background:"linear-gradient(135deg,#ef4444 0%,#dc2626 100%)",
+        borderRadius:16,color:"#fff"}}>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.8)",marginBottom:4}}>Panel privado</div>
+        <div style={{fontSize:20,fontWeight:800}}>💸 Pagos Pendientes</div>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginTop:4}}>
+          Cuotas vencidas y próximas a vencer de tus pacientes
+        </div>
+      </div>
+
+      {/* Resumen */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+        {[
+          {label:"Total pendiente",value:`$${totalPendiente.toLocaleString("es-AR",{maximumFractionDigits:0})}`,color:"#ef4444",bg:"#fef2f2"},
+          {label:"Cuotas vencidas",value:vencidas.length,color:"#dc2626",bg:"#fee2e2"},
+          {label:"Por vencer",value:porVencer.length,color:"#f59e0b",bg:"#fffbeb"},
+        ].map(({label,value,color,bg})=>(
+          <div key={label} style={{backgroundColor:bg,borderRadius:12,padding:"14px",textAlign:"center",border:`1px solid ${color}22`}}>
+            <div style={{fontSize:20,fontWeight:800,color}}>{value}</div>
+            <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {pendingItems.length===0?(
+        <div style={{padding:40,textAlign:"center",backgroundColor:"#f0fdf4",borderRadius:12,border:"1px solid #bbf7d0"}}>
+          <div style={{fontSize:36,marginBottom:8}}>✅</div>
+          <div style={{fontWeight:700,fontSize:15,color:"#166534"}}>¡Sin pagos pendientes!</div>
+          <div style={{fontSize:13,color:"#16a34a",marginTop:4}}>Todos los pacientes están al día</div>
+        </div>
+      ):(
+        <>
+          <Section title="⚠️ Cuotas vencidas" items={vencidas} color="#ef4444" bg="#fee2e2" border="#fca5a5"/>
+          <Section title="📅 Por vencer" items={porVencer} color="#f59e0b" bg="#fffbeb" border="#fde68a"/>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const TABS=[
   {id:"ficha",label:"📋 Ficha"},
@@ -2051,7 +3412,7 @@ const TABS=[
   {id:"imagenes",label:"🩻 Imágenes"},
   {id:"presupuestos",label:"💰 Presupuestos"},
   {id:"pagos",label:"💳 Pagos"},
-  {id:"turnos",label:"📅 Turnos"},
+  {id:"turnos",label:"📅 Agenda"},
 ];
 
 
@@ -2063,8 +3424,10 @@ function DentalApp({currentProf,onLogout}){
   const [loading,setLoading]=useState(true);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [showProfile,setShowProfile]=useState(false);
+  const [dashboardView,setDashboardView]=useState("inicio"); // "inicio" | "estadisticas" | "pagos_pendientes"
   const [profData,setProfData]=useState(currentProf);
   const [waMsgModal,setWaMsgModal]=useState(null); // {patient, ownerProf} o null
+  const [confirmDel,setConfirmDel]=useState(null); // {msg, onOk} o null
   const isMobile=typeof window!=="undefined"&&window.innerWidth<768;
   const autoSaveTimer=useRef(null);
   const pendingPatientRef=useRef(null);
@@ -2099,6 +3462,15 @@ function DentalApp({currentProf,onLogout}){
 
   const sel=patients.find(p=>p.id===selectedId);
   const handleNew=()=>{const p=emptyPatient(currentProf.id);setPatients(prev=>[p,...prev]);setSelectedId(p.id);setActiveTab("ficha");setSidebarOpen(false);};
+
+  // Crear paciente "pendiente" desde el dashboard (agenda rápida con paciente nuevo)
+  const handleCreatePendingPatient=({firstName,lastName,phone})=>{
+    const p=emptyPatient(currentProf.id,{firstName,lastName,phone,pending:true});
+    setPatients(prev=>[p,...prev]);
+    setAllPatients(prev=>[p,...prev]);
+    sSet(`patient:${p.id}`,p); // guardar inmediato
+    return p;
+  };
   const handleSelect=async id=>{
     const patient=allPatients.find(p=>p.id===id);
     if(!patient) return;
@@ -2167,17 +3539,25 @@ function DentalApp({currentProf,onLogout}){
     setSaveStatus("saved");
     setTimeout(()=>setSaveStatus("idle"),2500);
   };
-  const handleDelete=async()=>{
+  const handleDelete=()=>{
     if(!sel)return;
-    if(!window.confirm(`¿Eliminar a ${sel.firstName} ${sel.lastName}?`))return;
-    if(autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    await sDel(`patient:${sel.id}`);
-    setPatients(prev=>prev.filter(p=>p.id!==sel.id));setSelectedId(null);setSaveStatus("idle");
+    const name=`${sel.firstName||""} ${sel.lastName||""}`.trim()||"este paciente";
+    setConfirmDel({
+      msg:`¿Eliminar a ${name}? Esta acción no se puede deshacer.`,
+      onOk:async()=>{
+        setConfirmDel(null);
+        if(autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+        await sDel(`patient:${sel.id}`);
+        setPatients(prev=>prev.filter(p=>p.id!==sel.id));
+        setSelectedId(null);setSaveStatus("idle");
+      }
+    });
   };
 
   return(
     <div style={{fontFamily:"'Inter',system-ui,sans-serif",display:"flex",height:"100vh",overflow:"hidden",backgroundColor:"#f8fafc"}}>
       {showProfile&&<ProfessionalProfile currentProf={profData} onClose={()=>setShowProfile(false)} onUpdate={p=>{setProfData(p);}}/>}
+      {confirmDel&&<ConfirmModal msg={confirmDel.msg} onOk={confirmDel.onOk} onCancel={()=>setConfirmDel(null)}/>}
       {waMsgModal&&<WhatsAppModal modal={waMsgModal} currentProf={profData}
         onConfirmed={patient=>{
           setWaMsgModal(null);
@@ -2223,6 +3603,35 @@ function DentalApp({currentProf,onLogout}){
               ⏏
             </button>
           </div>
+        </div>
+        <div style={{padding:"10px 14px 0",display:"flex",flexDirection:"column",gap:6}}>
+          <button onClick={()=>{setSelectedId(null);setDashboardView("inicio");setSidebarOpen(false);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:9,
+              border:!selectedId&&dashboardView==="inicio"?"2px solid #2563eb":"2px solid #e2e8f0",
+              backgroundColor:!selectedId&&dashboardView==="inicio"?"#eff6ff":"#fff",
+              color:!selectedId&&dashboardView==="inicio"?"#2563eb":"#64748b",
+              fontWeight:700,fontSize:12,cursor:"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            🏠 Inicio
+          </button>
+          <button onClick={()=>{setSelectedId(null);setDashboardView("estadisticas");setSidebarOpen(false);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:9,
+              border:!selectedId&&dashboardView==="estadisticas"?"2px solid #7c3aed":"2px solid #e2e8f0",
+              backgroundColor:!selectedId&&dashboardView==="estadisticas"?"#f5f3ff":"#fff",
+              color:!selectedId&&dashboardView==="estadisticas"?"#7c3aed":"#64748b",
+              fontWeight:700,fontSize:12,cursor:"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            📊 Estadísticas
+          </button>
+          <button onClick={()=>{setSelectedId(null);setDashboardView("pagos_pendientes");setSidebarOpen(false);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:9,
+              border:!selectedId&&dashboardView==="pagos_pendientes"?"2px solid #ef4444":"2px solid #e2e8f0",
+              backgroundColor:!selectedId&&dashboardView==="pagos_pendientes"?"#fef2f2":"#fff",
+              color:!selectedId&&dashboardView==="pagos_pendientes"?"#ef4444":"#64748b",
+              fontWeight:700,fontSize:12,cursor:"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            💸 Pagos Pendientes
+          </button>
         </div>
         {loading?<div style={{padding:24,textAlign:"center",color:"#94a3b8"}}>Cargando...</div>
           :<PatientList patients={patients} allPatients={allPatients} onSelect={handleSelect} onNew={handleNew} selectedId={selectedId} currentProfId={currentProf.id}/>}
@@ -2278,6 +3687,7 @@ function DentalApp({currentProf,onLogout}){
               {activeTab==="odontograma"&&(
                 <OdontogramPanel
                   teeth={sel.teeth||{}} milkTeeth={sel.milkTeeth||{}}
+                  patient={sel} onChange={handleChange}
                   onTeethChange={t=>handleChange({...sel,teeth:t,updatedAt:new Date().toISOString()})}
                   onMilkChange={t=>handleChange({...sel,milkTeeth:t,updatedAt:new Date().toISOString()})}
                 />
@@ -2286,15 +3696,20 @@ function DentalApp({currentProf,onLogout}){
               {activeTab==="imagenes"&&<ImagesPanel patient={sel} onChange={handleChange}/>}
               {activeTab==="presupuestos"&&<BudgetPanel patient={sel} onChange={handleChange} currentProf={profData}/>}
               {activeTab==="pagos"&&<PaymentsPanel patient={sel} onChange={handleChange}/>}
-              {activeTab==="turnos"&&<AppointmentsPanel patient={sel}/>}
+              {activeTab==="turnos"&&<AppointmentsPanel patient={sel} onChange={handleChange} currentProf={profData} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);}}/>}
             </div>
           </>
         ):(
-          <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,color:"#94a3b8"}}>
-            <img src={LOGO_B64} alt="Logo" style={{width:100,height:100,borderRadius:18,objectFit:"cover",boxShadow:"0 8px 24px rgba(0,0,0,0.12)"}}/>
-            <div style={{fontSize:17,fontWeight:800,color:"#1e293b"}}>Odontología Werbag</div>
-            <div style={{fontSize:13}}>Seleccioná un paciente o creá uno nuevo</div>
-            <button onClick={handleNew} style={{...btnPrimary,marginTop:8,padding:"10px 24px",fontSize:14}}>+ Crear primer paciente</button>
+          <div style={{flex:1,overflowY:"auto"}}>
+            {dashboardView==="estadisticas"?(
+              <StatsPanel currentProf={profData} patients={patients}/>
+            ):dashboardView==="pagos_pendientes"?(
+              <PendingPaymentsPanel patients={patients} allPatients={allPatients} onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}/>
+            ):(
+              <Dashboard currentProf={profData} patients={patients} allPatients={allPatients}
+                onSelectPatient={id=>{handleSelect(id);setSidebarOpen(false);}}
+                onCreatePendingPatient={handleCreatePendingPatient}/>
+            )}
           </div>
         )}
       </div>
@@ -2311,4 +3726,10 @@ export default function RootApp(){
     // Aplicar nombre personalizado y género al objeto del profesional
     const displayProf={...prof, name: names[prof.id]||prof.name, gender: genders[prof.id]||"dr"};
     setCurrentProf(displayProf);
-    
+    setProfNames(names);
+  };
+  const handleLogout=()=>{setCurrentProf(null);};
+
+  if(!currentProf) return <LoginScreen onLogin={handleLogin}/>;
+  return <DentalApp currentProf={currentProf} onLogout={handleLogout}/>;
+}
