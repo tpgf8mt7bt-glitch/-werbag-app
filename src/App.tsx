@@ -2311,10 +2311,4 @@ export default function RootApp(){
     // Aplicar nombre personalizado y género al objeto del profesional
     const displayProf={...prof, name: names[prof.id]||prof.name, gender: genders[prof.id]||"dr"};
     setCurrentProf(displayProf);
-    setProfNames(names);
-  };
-  const handleLogout=()=>{setCurrentProf(null);};
-
-  if(!currentProf) return <LoginScreen onLogin={handleLogin}/>;
-  return <DentalApp currentProf={currentProf} onLogout={handleLogout}/>;
-}
+    
